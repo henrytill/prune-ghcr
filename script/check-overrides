@@ -1,0 +1,195 @@
+#!/usr/bin/env node
+
+// Reports which entries in package.json's `overrides` block are still earning
+// their place.
+//
+// Every override here exists to pin a transitive dependency to a patched
+// version that its parent's range would not otherwise pick. Once the parent
+// catches up, the override becomes redundant -- and a redundant override is
+// worse than none, because it silently holds the tree at whatever floor it
+// names, including below what npm would now choose on its own. Nothing in npm
+// or Dependabot notices this: `npm outdated` reports declared dependencies, and
+// Dependabot treats overrides as manual remediation it suggests but does not
+// manage.
+//
+// The test is mechanical: resolve the tree again with the overrides removed and
+// see whether the advisories come back. If they do not, the override is done.
+//
+// Usage:
+//
+// script/check-overrides
+//
+// Exits 1 when at least one override is redundant, 2 when the tree cannot be
+// resolved without them and the answer is therefore unknown.
+//
+// To exercise the "needed" verdict -- which this repository's own overrides
+// cannot, since they all currently report redundant -- build a project whose
+// vulnerable dependency is transitive and pinned exactly. npm rejects an
+// override that conflicts with a direct dependency, so it has to sit one level
+// down:
+//
+//   dep/package.json   { "dependencies": { "minimatch": "3.0.4" } }
+//   package.json       { "dependencies": { "fixture-dep": "file:./dep" },
+//                        "overrides": { "minimatch": "^3.0.5" } }
+//
+// npm install --package-lock-only, then run this from that directory: it should
+// report minimatch as needed and exit 0.
+
+import { execFileSync } from 'node:child_process'
+import {
+  copyFileSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+
+/**
+ * Collects the package names an overrides block pins, flattening the nested
+ * `{ parent: { child: range } }` form into the names actually being pinned.
+ *
+ * @param overrides The `overrides` object from package.json.
+ * @returns One entry per pinned package, with the parent it is scoped to.
+ */
+function pinnedPackages(overrides) {
+  const pins = []
+
+  for (const [key, value] of Object.entries(overrides)) {
+    if (typeof value === 'string') {
+      pins.push({ name: key, parent: null, range: value })
+    } else {
+      for (const [name, range] of Object.entries(value)) {
+        pins.push({ name, parent: key, range })
+      }
+    }
+  }
+
+  return pins
+}
+
+/**
+ * Resolves the dependency tree with no overrides at all and audits it.
+ *
+ * The existing lockfile is copied in first, because that is what removing an
+ * override from this repository would actually do: npm re-resolves from the
+ * lockfile it has and changes as little as it can. Resolving into an empty
+ * directory instead picks the newest version satisfying every range, which
+ * makes every override look redundant whether or not it is.
+ *
+ * Only the lockfile is generated: node_modules is never populated, and install
+ * scripts never run.
+ *
+ * @param manifest The parsed package.json.
+ * @returns The set of package names that npm audit flags without overrides.
+ */
+function advisoriesWithoutOverrides(manifest, { fromLockfile }) {
+  const dir = mkdtempSync(join(tmpdir(), 'check-overrides-'))
+
+  try {
+    const { overrides, ...rest } = manifest
+    void overrides
+
+    // Resolution happens in a temporary directory, so any dependency named by
+    // a relative path would point at nothing. Absolutise them.
+    for (const field of ['dependencies', 'devDependencies']) {
+      for (const [name, spec] of Object.entries(rest[field] ?? {})) {
+        if (typeof spec === 'string' && spec.startsWith('file:')) {
+          rest[field][name] = `file:${resolve(spec.slice('file:'.length))}`
+        }
+      }
+    }
+
+    writeFileSync(join(dir, 'package.json'), JSON.stringify(rest, null, 2))
+    if (fromLockfile) {
+      copyFileSync('package-lock.json', join(dir, 'package-lock.json'))
+    }
+
+    try {
+      execFileSync(
+        'npm',
+        ['install', '--package-lock-only', '--ignore-scripts', '--silent'],
+        { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] }
+      )
+    } catch {
+      // Resolution can fail for reasons that have nothing to do with the
+      // overrides -- an unreachable registry, a dependency that only resolves
+      // with them in place. Either way the answer is unknown, not "redundant".
+      console.error(
+        'Could not resolve the tree without the overrides; see npm output above.'
+      )
+      process.exit(2)
+    }
+
+    // npm audit exits non-zero when it finds anything, which is the expected
+    // case here, so the status is ignored and only the report is read.
+    let report
+    try {
+      report = execFileSync('npm', ['audit', '--json'], {
+        cwd: dir,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore']
+      })
+    } catch (error) {
+      report = error.stdout
+    }
+
+    return new Set(Object.keys(JSON.parse(report).vulnerabilities ?? {}))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
+const overrides = manifest.overrides ?? {}
+const pins = pinnedPackages(overrides)
+
+if (pins.length === 0) {
+  console.log('No overrides to check.')
+  process.exit(0)
+}
+
+// Two questions, and an override earns its place by answering yes to either.
+//
+// Dropping it today: npm re-resolves from the current lockfile and changes as
+// little as it can, so this asks whether the tree as it stands would regress.
+//
+// Dropping it on a fresh resolve: no lockfile, so npm picks the newest version
+// satisfying every range. This asks whether the parent's own range has caught
+// up. If it has, the override is only compensating for a stale lockfile entry,
+// which `npm update <package>` fixes without a permanent pin.
+console.log(`Re-resolving without ${pins.length} override(s)...`)
+const flaggedToday = advisoriesWithoutOverrides(manifest, {
+  fromLockfile: true
+})
+const flaggedFresh = advisoriesWithoutOverrides(manifest, {
+  fromLockfile: false
+})
+const flagged = new Set([...flaggedToday, ...flaggedFresh])
+
+const redundant = pins.filter((pin) => !flagged.has(pin.name))
+const needed = pins.filter((pin) => flagged.has(pin.name))
+
+for (const pin of needed) {
+  const scope = pin.parent ? ` (under ${pin.parent})` : ''
+  console.log(`  needed     ${pin.name}${scope} → ${pin.range}`)
+}
+
+for (const pin of redundant) {
+  const scope = pin.parent ? ` (under ${pin.parent})` : ''
+  console.log(`  REDUNDANT  ${pin.name}${scope} → ${pin.range}`)
+}
+
+if (redundant.length === 0) {
+  console.log('\nEvery override is still doing something.')
+  process.exit(0)
+}
+
+console.log(
+  `\n${redundant.length} override(s) no longer prevent an advisory. Remove them` +
+    ' from package.json, run npm install, and confirm npm audit stays clean.' +
+    '\nAn override that outlives its advisory pins the tree at its floor for no' +
+    ' reason.'
+)
+process.exit(1)
