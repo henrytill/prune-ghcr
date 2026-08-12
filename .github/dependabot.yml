@@ -4,6 +4,15 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Wait for a release to survive in the wild before adopting it. A
+    # compromised release is usually yanked within days, and nothing here is
+    # urgent enough to be worth being the first to install it. Security
+    # advisories bypass cooldown, so real fixes still arrive immediately.
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     groups:
       actions-minor:
         update-types:
@@ -14,6 +23,13 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # See the note above: npm is the ecosystem where install-time compromise is
+    # most common, so the same waiting period applies.
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     ignore:
       # TypeScript 7 is the native port: it exports the compiler API from
       # ./unstable/* instead of the package root, so ts-jest (peers <7),
