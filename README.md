@@ -100,6 +100,9 @@ To run the action locally, copy `.env.example` to `.env`, fill in a token, and:
 npm run local-action
 ```
 
+That rebuilds the bundle and runs it under `node --env-file`, so a local run
+exercises exactly what a workflow would.
+
 ## License
 
 MIT
