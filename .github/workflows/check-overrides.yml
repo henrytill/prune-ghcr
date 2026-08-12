@@ -54,10 +54,26 @@ jobs:
           TITLE: Redundant overrides in package.json
         run: |
           existing="$(gh issue list --state open --search "$TITLE" --json number --jq '.[0].number // empty')"
-          body="$(printf 'The monthly override check found entries that no longer prevent an advisory.\n\n```\n%s\n```\n\nRemove them from `package.json`, run `npm install`, and confirm `npm audit` stays clean.\n' "$(cat report.txt)")"
+
+          # Quoted heredocs, so the markdown backticks stay literal and are not
+          # read as command substitution.
+          {
+            cat <<'MARKDOWN'
+          The monthly override check found entries that no longer prevent an advisory.
+
+          ```
+          MARKDOWN
+            cat report.txt
+            cat <<'MARKDOWN'
+          ```
+
+          Remove them from `package.json`, run `npm install`, and confirm that
+          `npm audit` stays clean.
+          MARKDOWN
+          } > body.md
 
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "$body"
+            gh issue comment "$existing" --body-file body.md
           else
-            gh issue create --title "$TITLE" --body "$body"
+            gh issue create --title "$TITLE" --body-file body.md
           fi
