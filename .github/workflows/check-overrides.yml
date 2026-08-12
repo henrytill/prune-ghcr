@@ -41,10 +41,15 @@ jobs:
         id: npm-ci
         run: npm ci --ignore-scripts
 
+      # pipefail, or tee's exit code masks the script's and the step passes
+      # while reporting redundant overrides -- which is what happened the first
+      # time this ran. The default shell here is bash -e, without pipefail.
       - name: Check Overrides
         id: check
         continue-on-error: true
-        run: script/check-overrides | tee report.txt
+        run: |
+          set -o pipefail
+          script/check-overrides | tee report.txt
 
       - name: Open an issue for redundant overrides
         id: open-issue
