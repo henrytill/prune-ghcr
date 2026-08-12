@@ -25,6 +25,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Unlike every other checkout here, this one keeps its credentials: the
+      # workflow commits the refreshed license cache and pushes it back.
+      # zizmor: ignore[artipacked]
       - name: Checkout
         id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
