@@ -19,7 +19,21 @@
 //
 // script/check-overrides
 //
-// Exits non-zero when at least one override is redundant.
+// Exits 1 when at least one override is redundant, 2 when the tree cannot be
+// resolved without them and the answer is therefore unknown.
+//
+// To exercise the "needed" verdict -- which this repository's own overrides
+// cannot, since they all currently report redundant -- build a project whose
+// vulnerable dependency is transitive and pinned exactly. npm rejects an
+// override that conflicts with a direct dependency, so it has to sit one level
+// down:
+//
+//   dep/package.json   { "dependencies": { "minimatch": "3.0.4" } }
+//   package.json       { "dependencies": { "fixture-dep": "file:./dep" },
+//                        "overrides": { "minimatch": "^3.0.5" } }
+//
+// npm install --package-lock-only, then run this from that directory: it should
+// report minimatch as needed and exit 0.
 
 import { execFileSync } from 'node:child_process'
 import {
@@ -30,7 +44,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 /**
  * Collects the package names an overrides block pins, flattening the nested
@@ -76,16 +90,37 @@ function advisoriesWithoutOverrides(manifest, { fromLockfile }) {
   try {
     const { overrides, ...rest } = manifest
     void overrides
+
+    // Resolution happens in a temporary directory, so any dependency named by
+    // a relative path would point at nothing. Absolutise them.
+    for (const field of ['dependencies', 'devDependencies']) {
+      for (const [name, spec] of Object.entries(rest[field] ?? {})) {
+        if (typeof spec === 'string' && spec.startsWith('file:')) {
+          rest[field][name] = `file:${resolve(spec.slice('file:'.length))}`
+        }
+      }
+    }
+
     writeFileSync(join(dir, 'package.json'), JSON.stringify(rest, null, 2))
     if (fromLockfile) {
       copyFileSync('package-lock.json', join(dir, 'package-lock.json'))
     }
 
-    execFileSync(
-      'npm',
-      ['install', '--package-lock-only', '--ignore-scripts', '--silent'],
-      { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] }
-    )
+    try {
+      execFileSync(
+        'npm',
+        ['install', '--package-lock-only', '--ignore-scripts', '--silent'],
+        { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] }
+      )
+    } catch {
+      // Resolution can fail for reasons that have nothing to do with the
+      // overrides -- an unreachable registry, a dependency that only resolves
+      // with them in place. Either way the answer is unknown, not "redundant".
+      console.error(
+        'Could not resolve the tree without the overrides; see npm output above.'
+      )
+      process.exit(2)
+    }
 
     // npm audit exits non-zero when it finds anything, which is the expected
     // case here, so the status is ignored and only the report is read.
