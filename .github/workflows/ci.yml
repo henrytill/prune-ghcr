@@ -44,6 +44,8 @@ jobs:
         id: npm-ci-test
         run: npm run ci-test
 
+  # An end-to-end run needs a PAT and a real package, neither of which a fork's
+  # pull request has; see the dry-run workflow for that.
   test-action:
     name: GitHub Actions Test
     runs-on: ubuntu-latest
@@ -53,12 +55,20 @@ jobs:
         id: checkout
         uses: actions/checkout@v6
 
+      # The token is deliberately empty: this only proves the bundled action
+      # loads and reports a misconfiguration instead of crashing.
       - name: Test Local Action
         id: test-action
+        continue-on-error: true
         uses: ./
         with:
-          milliseconds: 2000
+          token: ''
+          dry-run: 'true'
 
-      - name: Print Output
+      - name: Check the action failed cleanly
         id: output
-        run: echo "${{ steps.test-action.outputs.time }}"
+        run: |
+          if [ "${{ steps.test-action.outcome }}" != "failure" ]; then
+            echo "::error::expected the action to fail on an empty token"
+            exit 1
+          fi

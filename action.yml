@@ -1,23 +1,46 @@
-name: The name of your action here
-description: Provide a description here
-author: Your name or organization here
-
-# Add your action's branding here. This will appear on the GitHub Marketplace.
+name: Prune untagged GHCR versions
+description: >-
+  Delete untagged container versions of a package, keeping any that a tagged
+  multi-arch index still references.
+author: Henry Till
 branding:
-  icon: heart
+  icon: trash-2
   color: red
 
-# Define your inputs here.
 inputs:
-  milliseconds:
-    description: Your input description here
+  token:
+    description: >-
+      PAT with delete:packages (classic) or read+write Packages (fine-grained).
+      GITHUB_TOKEN cannot delete versions of a user-owned package.
     required: true
-    default: '1000'
+  owner:
+    description: Owner of the package.
+    required: false
+    default: ${{ github.repository_owner }}
+  package:
+    description: Container package name.
+    required: false
+    default: ${{ github.event.repository.name }}
+  min-age-hours:
+    description: >-
+      Skip versions younger than this. If the publishing workflow serializes its
+      runs, a concurrent build cannot leave child manifests untagged while this
+      runs, and 0 is safe. Raise it if anything else pushes to the package
+      out-of-band.
+    required: false
+    default: '0'
+  dry-run:
+    description: Report what would be deleted without deleting it.
+    required: false
+    default: 'false'
 
-# Define your outputs here.
 outputs:
-  time:
-    description: Your output description here
+  deleted:
+    description: Number of versions deleted.
+  kept:
+    description: Number of versions kept.
+  failed:
+    description: Number of versions that failed to delete.
 
 runs:
   using: node24
