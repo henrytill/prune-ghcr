@@ -1,0 +1,39 @@
+name: Dry Run
+
+# End-to-end smoke test against a real package. Manual, because it needs a PAT
+# and a package name that only the repository owner can supply.
+on:
+  workflow_dispatch:
+    inputs:
+      owner:
+        description: Owner of the package.
+        required: true
+      package:
+        description: Container package name.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    name: Dry Run
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v6
+
+      - name: Prune (dry run)
+        id: prune
+        uses: ./
+        with:
+          token: ${{ secrets.GHCR_PAT }}
+          owner: ${{ inputs.owner }}
+          package: ${{ inputs.package }}
+          dry-run: 'true'
+
+      - name: Print Output
+        id: output
+        run: echo "kept ${{ steps.prune.outputs.kept }}"

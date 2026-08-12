@@ -7,56 +7,118 @@
  */
 import { jest } from '@jest/globals'
 import * as core from '../__fixtures__/core.js'
-import { wait } from '../__fixtures__/wait.js'
+import { api } from '../__fixtures__/api.js'
+import { registry } from '../__fixtures__/registry.js'
+import type { prune as pruneType } from '../src/prune.js'
 
-// Mocks should be declared before the module being tested is imported.
+const GitHubApi = jest.fn(() => api)
+const create = jest.fn(async () => registry)
+const prune = jest.fn<typeof pruneType>()
+
 jest.unstable_mockModule('@actions/core', () => core)
-jest.unstable_mockModule('../src/wait.js', () => ({ wait }))
+jest.unstable_mockModule('../src/api.js', () => ({ GitHubApi }))
+jest.unstable_mockModule('../src/registry.js', () => ({
+  RegistryClient: { create }
+}))
+jest.unstable_mockModule('../src/prune.js', () => ({ prune }))
 
-// The module being tested should be imported dynamically. This ensures that the
-// mocks are used in place of any actual dependencies.
 const { run } = await import('../src/main.js')
+
+const inputs: Record<string, string> = {
+  token: 'ghp_token',
+  owner: 'henrytill',
+  package: 'devcontainer-debian',
+  'min-age-hours': '0'
+}
 
 describe('main.ts', () => {
   beforeEach(() => {
-    // Set the action's inputs as return values from core.getInput().
-    core.getInput.mockImplementation(() => '500')
-
-    // Mock the wait function so that it does not actually wait.
-    wait.mockImplementation(() => Promise.resolve('done!'))
+    core.getInput.mockImplementation((name: string) => inputs[name] ?? '')
+    core.getBooleanInput.mockImplementation(() => false)
+    prune.mockResolvedValue({ total: 3, kept: 2, deleted: 1, failed: 0 })
   })
 
   afterEach(() => {
     jest.resetAllMocks()
   })
 
-  it('Sets the time output', async () => {
+  it('Prunes with the inputs and sets outputs', async () => {
     await run()
 
-    // Verify the time output was set.
-    expect(core.setOutput).toHaveBeenNthCalledWith(
-      1,
-      'time',
-      // Simple regex to match a time string in the format HH:MM:SS.
-      expect.stringMatching(/^\d{2}:\d{2}:\d{2}/)
+    expect(create).toHaveBeenCalledWith(
+      'henrytill',
+      'devcontainer-debian',
+      'ghp_token'
+    )
+    expect(prune).toHaveBeenCalledWith(
+      {
+        owner: 'henrytill',
+        packageName: 'devcontainer-debian',
+        minAgeHours: 0,
+        dryRun: false
+      },
+      api,
+      registry
+    )
+    expect(core.setOutput).toHaveBeenCalledWith('deleted', 1)
+    expect(core.setOutput).toHaveBeenCalledWith('kept', 2)
+    expect(core.setOutput).toHaveBeenCalledWith('failed', 0)
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('Strips whitespace from the token', async () => {
+    core.getInput.mockImplementation((name: string) =>
+      name === 'token' ? 'ghp_token\n' : (inputs[name] ?? '')
+    )
+
+    await run()
+
+    expect(create).toHaveBeenCalledWith(
+      'henrytill',
+      'devcontainer-debian',
+      'ghp_token'
     )
   })
 
-  it('Sets a failed status', async () => {
-    // Clear the getInput mock and return an invalid value.
-    core.getInput.mockClear().mockReturnValueOnce('this is not a number')
-
-    // Clear the wait mock and return a rejected promise.
-    wait
-      .mockClear()
-      .mockRejectedValueOnce(new Error('milliseconds is not a number'))
+  it('Fails when the token is empty', async () => {
+    core.getInput.mockImplementation((name: string) =>
+      name === 'token' ? '  \n' : (inputs[name] ?? '')
+    )
 
     await run()
 
-    // Verify that the action was marked as failed.
-    expect(core.setFailed).toHaveBeenNthCalledWith(
-      1,
-      'milliseconds is not a number'
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining('token input is empty')
     )
+    expect(prune).not.toHaveBeenCalled()
+  })
+
+  it('Fails on a min-age-hours that is not a non-negative number', async () => {
+    core.getInput.mockImplementation((name: string) =>
+      name === 'min-age-hours' ? 'soon' : (inputs[name] ?? '')
+    )
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining('min-age-hours')
+    )
+    expect(prune).not.toHaveBeenCalled()
+  })
+
+  it('Fails the run when a delete failed', async () => {
+    prune.mockResolvedValue({ total: 3, kept: 1, deleted: 1, failed: 1 })
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith('failed to delete 1 version(s)')
+  })
+
+  it('Fails the run on an unexpected error', async () => {
+    prune.mockRejectedValue(new Error('boom'))
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith('boom')
   })
 })

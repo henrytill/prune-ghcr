@@ -52,7 +52,11 @@ export default [
             'eslint.config.mjs',
             'jest.config.js',
             'rollup.config.ts'
-          ]
+          ],
+          // Tests and fixtures live outside tsconfig.json's `include`, so they
+          // all land in the default project; the stock limit of 8 is smaller
+          // than the number of files here.
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 50
         },
         tsconfigRootDir: import.meta.dirname
       }

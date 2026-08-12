@@ -1,17 +1,17 @@
 {
-  "name": "typescript-action",
-  "description": "GitHub Actions TypeScript template",
+  "name": "prune-ghcr",
+  "description": "GitHub Action that deletes untagged GHCR container versions",
   "version": "0.0.0",
-  "author": "",
+  "author": "Henry Till",
   "type": "module",
   "private": true,
-  "homepage": "https://github.com/actions/typescript-action",
+  "homepage": "https://github.com/henrytill/prune-ghcr",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/actions/typescript-action.git"
+    "url": "git+https://github.com/henrytill/prune-ghcr.git"
   },
   "bugs": {
-    "url": "https://github.com/actions/typescript-action/issues"
+    "url": "https://github.com/henrytill/prune-ghcr/issues"
   },
   "keywords": [
     "actions"
@@ -37,7 +37,8 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@actions/core": "^3.0.0"
+    "@actions/core": "^3.0.0",
+    "@actions/http-client": "^4.0.0"
   },
   "devDependencies": {
     "@eslint/compat": "^2.0.2",
