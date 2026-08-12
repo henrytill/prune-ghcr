@@ -1,0 +1,63 @@
+# Overrides in package.json pin transitive dependencies to patched versions.
+# Nothing in npm or Dependabot notices when one stops being necessary, so this
+# asks monthly and opens an issue when the answer changes.
+
+name: Check Overrides
+
+on:
+  schedule:
+    # The first of the month, which is often enough for a question whose answer
+    # changes when upstream cuts a release.
+    - cron: '0 12 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-overrides:
+    name: Check Overrides
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        id: setup-node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install Dependencies
+        id: npm-ci
+        run: npm ci --ignore-scripts
+
+      - name: Check Overrides
+        id: check
+        continue-on-error: true
+        run: script/check-overrides | tee report.txt
+
+      - name: Open an issue for redundant overrides
+        id: open-issue
+        if: steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: Redundant overrides in package.json
+        run: |
+          existing="$(gh issue list --state open --search "$TITLE" --json number --jq '.[0].number // empty')"
+          body="$(printf 'The monthly override check found entries that no longer prevent an advisory.\n\n```\n%s\n```\n\nRemove them from `package.json`, run `npm install`, and confirm `npm audit` stays clean.\n' "$(cat report.txt)")"
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi
