@@ -3,6 +3,9 @@ name: Dry Run
 # End-to-end smoke test against a real package. Manual, because it needs a PAT
 # and a package name that only the repository owner can supply.
 on:
+  # checkov:skip=CKV_GHA_7: this workflow builds and publishes nothing, so the
+  # inputs cannot influence a build output. They only name the package to
+  # report on, and the run is a dry run.
   workflow_dispatch:
     inputs:
       owner:

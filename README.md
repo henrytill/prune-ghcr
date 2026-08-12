@@ -73,10 +73,10 @@ tag.
 1. Lists every version of the package via the packages REST API
    (`/user/packages/...` when the token owns the package, `/orgs/...`
    otherwise), following pagination.
-2. Exchanges the PAT for a `ghcr.io` pull token and fetches each tagged
-   manifest, accepting the OCI and Docker index media types so multi-arch
-   indexes come back as indexes.
-3. Keeps every tagged version and every digest referenced by one, then deletes
+1. Exchanges the PAT for a `ghcr.io` pull token and fetches each tagged
+   manifest, accepting the OCI and Docker index media types so a multi-arch
+   image index comes back as an index rather than a single platform manifest.
+1. Keeps every tagged version and every digest referenced by one, then deletes
    the untagged remainder that is older than `min-age-hours`.
 
 Transient failures (network errors, 5xx, 429) are retried with a linear backoff;
