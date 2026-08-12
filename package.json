@@ -1,7 +1,7 @@
 {
   "name": "prune-ghcr",
   "description": "GitHub Action that deletes untagged GHCR container versions",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "author": "Henry Till",
   "type": "module",
   "private": true,
