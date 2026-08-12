@@ -66,5 +66,10 @@
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "*"
+  },
+  "overrides": {
+    "@actions/http-client": {
+      "undici": "^6.28.0"
+    }
   }
 }
