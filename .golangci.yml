@@ -1,0 +1,21 @@
+# See: https://golangci-lint.run/usage/configuration/
+#
+# This is the single source of truth for Go static analysis. super-linter runs
+# golangci-lint for Go and reads this file by default (GO_CONFIG_FILE), so the
+# same configuration applies in CI and to `golangci-lint run` locally.
+#
+# The Go job in ci.yml deliberately does not run `go vet` or `staticcheck` as
+# separate steps: the standard set below already includes both. Running them
+# twice, at two versions, under two configurations, is how this branch first
+# produced a green Go job alongside a red lint job.
+
+version: '2'
+
+linters:
+  # errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+
+run:
+  # The default is a minute, which a cold build of the dependency graph can
+  # exceed on a loaded runner.
+  timeout: 5m

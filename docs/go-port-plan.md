@@ -243,9 +243,18 @@ Consequences to handle:
   host happens to have.
 - Coverage badge: `go test -coverprofile` plus a badge step, or drop the badge.
   The Go CI job already writes `coverage.out` and nothing consumes it.
-- `staticcheck` and `govulncheck` run via `go run tool@latest`, which keeps them
-  out of `go.mod` at the cost of not being pinned. Revisit if a release of
-  either breaks CI unprompted.
+- Static analysis has one owner. super-linter already runs `golangci-lint` for
+  Go, and the standard set includes `govet` and `staticcheck`, so the Go job
+  runs neither separately — the first CI run on this branch produced a green Go
+  job and a red lint job for exactly that reason. `.golangci.yml` is the shared
+  configuration, and it is the version super-linter bundles that decides
+  behavior, so that action's pin is the one that matters.
+- Vulnerability scanning is its own workflow on a weekly schedule, not a step in
+  CI. Advisories land independently of commits: the four that failed the first
+  run here all predated the branch. It uses `golang/govulncheck-action` pinned
+  by SHA rather than `go run tool@latest`, which was unpinned in a repository
+  that pins everything else, and scans with the toolchain in `go.mod` rather
+  than the newest one satisfying it.
 - CodeQL supports Go; only the language matrix changes.
 - `package.json` held the release version of record. Something else has to: a
   `VERSION` file, or the git tag alone. Note that `action.yml` now carries the

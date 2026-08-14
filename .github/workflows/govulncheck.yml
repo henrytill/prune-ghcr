@@ -1,0 +1,45 @@
+name: Vulnerability Check
+
+# Vulnerabilities are disclosed on their own schedule, not on ours. The four
+# standard library advisories that failed this branch's first CI run all
+# predated the branch; a check that only fires on a push means a quiet
+# repository can sit on a reachable advisory indefinitely. The weekly run is
+# the point of this workflow -- the pull_request trigger is the cheap part.
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '43 6 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: Vulnerability Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Govulncheck
+        id: govulncheck
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          # The repository is already checked out above, with credentials
+          # dropped; the action would otherwise check out again and keep them.
+          repo-checkout: false
+          go-version-file: go.mod
+          # Scan with the toolchain we actually ship, not the newest one that
+          # satisfies it. A newer Go would quietly hide standard library
+          # advisories that the released binary is still exposed to.
+          check-latest: false
