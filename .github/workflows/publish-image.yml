@@ -1,0 +1,71 @@
+name: Publish Image
+
+# Builds and pushes the image the action runs. The digest it prints is what
+# action.yml must reference: a floating tag would mean a consumer pinning this
+# action by commit SHA still got whatever was pushed to that tag last.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish, e.g. v1.1.0 or a prerelease.
+        required: true
+  push:
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve Tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: echo "tag=${INPUT_TAG:-$REF_NAME}" >>"$GITHUB_OUTPUT"
+
+      - name: Set Up Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log In
+        id: login
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Go cross-compiles, so both platforms build natively on the runner and
+      # no QEMU emulation is involved.
+      - name: Build and Push
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.tag }}
+          provenance: false
+
+      - name: Print the digest to pin
+        id: digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          echo "Reference this from action.yml:"
+          echo "  image: docker://ghcr.io/${GITHUB_REPOSITORY}@${DIGEST}"

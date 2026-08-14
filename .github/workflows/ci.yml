@@ -12,6 +12,48 @@ permissions:
   contents: read
 
 jobs:
+  test-go:
+    name: Go Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        id: setup-go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Check Format
+        id: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed for: $unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        id: vet
+        run: go vet ./...
+
+      - name: Staticcheck
+        id: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
+      - name: Test
+        id: test
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Govulncheck
+        id: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
   test-typescript:
     name: TypeScript Tests
     runs-on: ubuntu-latest
