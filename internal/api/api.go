@@ -7,152 +7,199 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"regexp"
-	"strings"
+	"time"
 
-	"github.com/henrytill/prune-ghcr/internal/httpx"
+	"github.com/google/go-github/v90/github"
+
 	"github.com/henrytill/prune-ghcr/internal/retry"
 )
 
-// APIVersion pins the REST API's documented behavior.
-const APIVersion = "2022-11-28"
+// packageType is the only package type this action prunes.
+const packageType = "container"
 
-// DefaultBaseURL is the public API. GITHUB_API_URL overrides it on Enterprise.
-const DefaultBaseURL = "https://api.github.com"
+// pageSize is the maximum the versions endpoint allows.
+const pageSize = 100
 
-// ContainerVersion is a container package version, as returned by the packages
-// API.
+// Timeout bounds a single request.
+const Timeout = 30 * time.Second
+
+// Target identifies the package to operate on.
+//
+// UserOwned selects the /user/packages endpoints, which are the only ones that
+// can delete versions of a package owned by a user rather than an organization.
+type Target struct {
+	Owner       string
+	PackageName string
+	UserOwned   bool
+}
+
+// ContainerVersion is a container package version.
+//
+// It is this package's own type rather than github.PackageVersion so that the
+// pointer dereferencing stays here, and so prune does not depend on go-github.
 type ContainerVersion struct {
-	ID        int64    `json:"id"`
-	Name      string   `json:"name"`
-	UpdatedAt string   `json:"updated_at"`
-	Metadata  Metadata `json:"metadata"`
-}
-
-// Metadata is the package-type-specific part of a version.
-type Metadata struct {
-	Container ContainerMetadata `json:"container"`
-}
-
-// ContainerMetadata carries the tags of a container version.
-type ContainerMetadata struct {
-	Tags []string `json:"tags"`
-}
-
-// Tags returns the tags of a version, or nothing for an untagged one.
-func (v ContainerVersion) Tags() []string { return v.Metadata.Container.Tags }
-
-// nextPattern matches the next-page entry of a Link header.
-var nextPattern = regexp.MustCompile(`<([^>]+)>\s*;\s*rel="next"`)
-
-// NextPageURL extracts the rel="next" URL from a Link header, and returns the
-// empty string at the last page.
-func NextPageURL(link string) string {
-	if link == "" {
-		return ""
-	}
-	for part := range strings.SplitSeq(link, ",") {
-		if match := nextPattern.FindStringSubmatch(part); match != nil {
-			return match[1]
-		}
-	}
-	return ""
+	ID   int64
+	Name string
+	// UpdatedAt is the zero time when the API did not report one, which callers
+	// must treat as unknown rather than as very old.
+	UpdatedAt time.Time
+	Tags      []string
 }
 
 // Client is a packages API client.
 type Client struct {
-	http    *httpx.Client
-	token   string
-	baseURL string
-	warn    func(string)
+	github *github.Client
+	warn   func(string)
 }
 
 // NewClient returns a client authenticating with token against baseURL.
 //
 // An empty baseURL selects the public API. warn receives one line per retry.
-func NewClient(token, baseURL string, warn func(string)) *Client {
-	if baseURL == "" {
-		baseURL = DefaultBaseURL
+func NewClient(token, baseURL string, warn func(string)) (*Client, error) {
+	// The timeout is explicit: go-github builds on net/http, which has none by
+	// default, and a wedged read would otherwise hang the job rather than fail
+	// and retry.
+	options := []github.ClientOptionsFunc{
+		github.WithAuthToken(token),
+		github.WithTimeout(Timeout),
 	}
-	return &Client{
-		http:    httpx.NewClient(),
-		token:   token,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		warn:    warn,
+	if baseURL != "" {
+		options = append(options, github.WithEnterpriseURLs(baseURL, baseURL))
 	}
-}
 
-func (c *Client) headers() map[string]string {
-	return map[string]string{
-		"accept":               "application/vnd.github+json",
-		"authorization":        "Bearer " + c.token,
-		"x-github-api-version": APIVersion,
-	}
-}
-
-// url resolves a path against the base URL, passing absolute URLs through so
-// that pagination can follow the Link header verbatim.
-func (c *Client) url(pathOrURL string) string {
-	if strings.HasPrefix(pathOrURL, "http") {
-		return pathOrURL
-	}
-	return c.baseURL + pathOrURL
-}
-
-// get performs a GET, retrying transient failures, and decodes the body into v.
-// It returns the response's Link header.
-func (c *Client) get(ctx context.Context, pathOrURL string, v any) (string, error) {
-	url := c.url(pathOrURL)
-	response, err := retry.Do(ctx, func(ctx context.Context) (*httpx.Response, error) {
-		return c.http.Do(ctx, http.MethodGet, url, c.headers())
-	}, retry.New("GET "+url, c.warn))
+	client, err := github.NewClient(options...)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("configuring the API client: %w", err)
 	}
 
-	if err := json.Unmarshal(response.Body, v); err != nil {
-		return "", &retry.NonRetryableError{Message: fmt.Sprintf("decoding %s: %s", url, err)}
+	return &Client{github: client, warn: warn}, nil
+}
+
+// statusError converts a go-github failure into an error that says whether
+// retrying could help, so a 403 or 404 fails immediately instead of burning
+// the backoff.
+func statusError(response *github.Response, err error) error {
+	if response == nil || response.Response == nil {
+		return err
 	}
-	return response.Header.Get("link"), nil
+	return retry.StatusError(err.Error(), response.StatusCode)
 }
 
 // AuthenticatedLogin returns the login of the user the token authenticates as.
 func (c *Client) AuthenticatedLogin(ctx context.Context) (string, error) {
-	var user struct {
-		Login string `json:"login"`
-	}
-	if _, err := c.get(ctx, "/user", &user); err != nil {
-		return "", err
-	}
-	return user.Login, nil
+	return retry.Do(ctx, func(ctx context.Context) (string, error) {
+		user, response, err := c.github.Users.Get(ctx, "")
+		if err != nil {
+			return "", statusError(response, err)
+		}
+		return user.GetLogin(), nil
+	}, retry.New("GET /user", c.warn))
+}
+
+// versionsPage carries a page of results together with the cursor to the next,
+// because a retried call can only yield one value.
+type versionsPage struct {
+	versions []*github.PackageVersion
+	nextPage int
 }
 
 // ListVersions lists every version of a package, following pagination to the
 // last page.
-//
-// basePath is the package's API path, e.g. /user/packages/container/foo.
-func (c *Client) ListVersions(ctx context.Context, basePath string) ([]ContainerVersion, error) {
+func (c *Client) ListVersions(ctx context.Context, target Target) ([]ContainerVersion, error) {
 	var versions []ContainerVersion
+	options := github.ListOptions{PerPage: pageSize}
 
-	for url := basePath + "/versions?per_page=100"; url != ""; {
-		var page []ContainerVersion
-		link, err := c.get(ctx, url, &page)
+	for {
+		page, err := retry.Do(ctx, func(ctx context.Context) (versionsPage, error) {
+			found, response, err := c.listPage(ctx, target, options)
+			if err != nil {
+				return versionsPage{}, statusError(response, err)
+			}
+			next := 0
+			if response != nil {
+				next = response.NextPage
+			}
+			return versionsPage{versions: found, nextPage: next}, nil
+		}, retry.New("list versions", c.warn))
 		if err != nil {
 			return nil, err
 		}
-		versions = append(versions, page...)
-		url = NextPageURL(link)
-	}
 
-	return versions, nil
+		for _, version := range page.versions {
+			converted, err := convert(version)
+			if err != nil {
+				return nil, err
+			}
+			versions = append(versions, converted)
+		}
+
+		if page.nextPage == 0 {
+			return versions, nil
+		}
+		options.Page = page.nextPage
+	}
+}
+
+// listPage dispatches to the user or organization endpoint.
+//
+// The /user path is the only one that can list and then delete versions of a
+// package owned by a user, so it is selected by ownership rather than by name.
+func (c *Client) listPage(
+	ctx context.Context, target Target, options github.ListOptions,
+) ([]*github.PackageVersion, *github.Response, error) {
+	if target.UserOwned {
+		return c.github.Users.ListPackageVersions(ctx, packageType, target.PackageName,
+			&github.ListPackageVersionsOptions{ListOptions: options})
+	}
+	return c.github.Organizations.PackageGetAllVersions(ctx, target.Owner, packageType,
+		target.PackageName, &github.PackageListOptions{ListOptions: options})
 }
 
 // DeleteVersion deletes one version of a package by id.
-func (c *Client) DeleteVersion(ctx context.Context, basePath string, id int64) error {
-	url := c.url(fmt.Sprintf("%s/versions/%d", basePath, id))
-	_, err := retry.Do(ctx, func(ctx context.Context) (*httpx.Response, error) {
-		return c.http.Do(ctx, http.MethodDelete, url, c.headers())
+func (c *Client) DeleteVersion(ctx context.Context, target Target, id int64) error {
+	_, err := retry.Do(ctx, func(ctx context.Context) (struct{}, error) {
+		var response *github.Response
+		var err error
+		if target.UserOwned {
+			// The empty user means the authenticated user, which is the
+			// /user/packages path.
+			response, err = c.github.Users.PackageDeleteVersion(ctx, "", packageType,
+				target.PackageName, id)
+		} else {
+			response, err = c.github.Organizations.PackageDeleteVersion(ctx, target.Owner,
+				packageType, target.PackageName, id)
+		}
+		if err != nil {
+			return struct{}{}, statusError(response, err)
+		}
+		return struct{}{}, nil
 	}, retry.New(fmt.Sprintf("delete version %d", id), c.warn))
 	return err
+}
+
+// convert flattens a go-github package version.
+//
+// Metadata is json.RawMessage rather than a struct, because the same field is
+// an array on webhook payloads, so the container tags have to be decoded here.
+func convert(version *github.PackageVersion) (ContainerVersion, error) {
+	converted := ContainerVersion{
+		ID:   version.GetID(),
+		Name: version.GetName(),
+	}
+	if version.UpdatedAt != nil {
+		converted.UpdatedAt = version.UpdatedAt.Time
+	}
+
+	if len(version.Metadata) > 0 {
+		var metadata github.PackageMetadata
+		if err := json.Unmarshal(version.Metadata, &metadata); err != nil {
+			return converted, &retry.NonRetryableError{
+				Message: fmt.Sprintf("decoding metadata of %s: %s", converted.Name, err)}
+		}
+		if metadata.Container != nil {
+			converted.Tags = metadata.Container.Tags
+		}
+	}
+
+	return converted, nil
 }

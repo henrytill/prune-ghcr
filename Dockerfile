@@ -6,9 +6,11 @@ FROM --platform=$BUILDPLATFORM golang:1.26.5-trixie AS build
 
 WORKDIR /src
 
-# There are no third-party dependencies, so there is nothing to download and no
-# go.sum to copy.
-COPY go.mod ./
+# Dependencies are downloaded in their own layer so that editing sources does
+# not re-fetch the module cache.
+COPY go.mod go.sum ./
+RUN go mod download
+
 COPY cmd ./cmd
 COPY internal ./internal
 

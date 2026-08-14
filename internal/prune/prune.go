@@ -16,8 +16,8 @@ import (
 // VersionsAPI is the subset of the packages API this package depends on.
 type VersionsAPI interface {
 	AuthenticatedLogin(ctx context.Context) (string, error)
-	ListVersions(ctx context.Context, basePath string) ([]api.ContainerVersion, error)
-	DeleteVersion(ctx context.Context, basePath string, id int64) error
+	ListVersions(ctx context.Context, target api.Target) ([]api.ContainerVersion, error)
+	DeleteVersion(ctx context.Context, target api.Target, id int64) error
 }
 
 // ManifestReader is the subset of the registry this package depends on.
@@ -48,15 +48,16 @@ type Result struct {
 	Failed  int
 }
 
-// basePath resolves the packages API path for a package.
+// target resolves which packages API endpoints apply to a package.
 //
-// A user-owned package lives under /user, which is the only path that can
-// delete its versions; anything else is treated as an organization.
-func basePath(owner, packageName, login string) string {
-	if login == owner {
-		return "/user/packages/container/" + packageName
+// A user-owned package is reached through /user, which is the only path that
+// can delete its versions; anything else is treated as an organization.
+func target(owner, packageName, login string) api.Target {
+	return api.Target{
+		Owner:       owner,
+		PackageName: packageName,
+		UserOwned:   login == owner,
 	}
-	return "/orgs/" + owner + "/packages/container/" + packageName
 }
 
 // Prune deletes untagged versions of a container package.
@@ -78,11 +79,11 @@ func Prune(
 	if err != nil {
 		return result, err
 	}
-	path := basePath(options.Owner, options.PackageName, login)
+	packageTarget := target(options.Owner, options.PackageName, login)
 
 	log.Info(fmt.Sprintf("==> Listing versions of %s/%s/%s",
 		registry.Host, options.Owner, options.PackageName))
-	all, err := versions.ListVersions(ctx, path)
+	all, err := versions.ListVersions(ctx, packageTarget)
 	if err != nil {
 		return result, err
 	}
@@ -91,7 +92,7 @@ func Prune(
 	keep := make(map[string]struct{})
 	tagged := 0
 	for _, version := range all {
-		if len(version.Tags()) > 0 {
+		if len(version.Tags) > 0 {
 			tagged++
 			keep[version.Name] = struct{}{}
 		}
@@ -116,23 +117,22 @@ func Prune(
 	cutoff := time.Now().Add(-options.MinAge)
 	var doomed []api.ContainerVersion
 	for _, version := range all {
-		if len(version.Tags()) > 0 {
+		if len(version.Tags) > 0 {
 			continue
 		}
 		if _, kept := keep[version.Name]; kept {
 			continue
 		}
 
-		updated, err := time.Parse(time.RFC3339, version.UpdatedAt)
-		if err != nil {
-			// The TypeScript version compared NaN here, which is false, so an
-			// unparseable timestamp meant the version got deleted. Skip it
-			// instead: this is the same refusal to guess as above.
-			log.Error(fmt.Sprintf("skipping %s (unparseable updated_at %q: %s)",
-				version.Name, version.UpdatedAt, err))
+		if version.UpdatedAt.IsZero() {
+			// An absent timestamp is unknown, not ancient. The TypeScript
+			// compared NaN here, which is false, so a version whose updated_at
+			// could not be read was deleted; skip it instead, on the same
+			// refusal to guess as the unreadable manifest above.
+			log.Error(fmt.Sprintf("skipping %s (no usable updated_at)", version.Name))
 			continue
 		}
-		if updated.After(cutoff) {
+		if version.UpdatedAt.After(cutoff) {
 			log.Info(fmt.Sprintf("    skipping %s (younger than %s)", version.Name, options.MinAge))
 			continue
 		}
@@ -158,7 +158,7 @@ func Prune(
 
 	log.Info(fmt.Sprintf("==> Deleting %d untagged version(s)", len(doomed)))
 	for _, version := range doomed {
-		if err := versions.DeleteVersion(ctx, path, version.ID); err != nil {
+		if err := versions.DeleteVersion(ctx, packageTarget, version.ID); err != nil {
 			result.Failed++
 			log.Error(fmt.Sprintf("failed to delete %s: %s", version.Name, err))
 			continue

@@ -16,8 +16,8 @@ func version(name string, id int64, tags []string, age time.Duration) api.Contai
 	return api.ContainerVersion{
 		ID:        id,
 		Name:      name,
-		UpdatedAt: time.Now().Add(-age).Format(time.RFC3339),
-		Metadata:  api.Metadata{Container: api.ContainerMetadata{Tags: tags}},
+		UpdatedAt: time.Now().Add(-age),
+		Tags:      tags,
 	}
 }
 
@@ -26,22 +26,22 @@ type fakeAPI struct {
 	versions  []api.ContainerVersion
 	deleteErr map[int64]error
 
-	listedPaths  []string
-	deletedIDs   []int64
-	deletedPaths []string
+	listedTargets  []api.Target
+	deletedIDs     []int64
+	deletedTargets []api.Target
 }
 
 func (f *fakeAPI) AuthenticatedLogin(context.Context) (string, error) {
 	return f.login, nil
 }
 
-func (f *fakeAPI) ListVersions(_ context.Context, basePath string) ([]api.ContainerVersion, error) {
-	f.listedPaths = append(f.listedPaths, basePath)
+func (f *fakeAPI) ListVersions(_ context.Context, target api.Target) ([]api.ContainerVersion, error) {
+	f.listedTargets = append(f.listedTargets, target)
 	return f.versions, nil
 }
 
-func (f *fakeAPI) DeleteVersion(_ context.Context, basePath string, id int64) error {
-	f.deletedPaths = append(f.deletedPaths, basePath)
+func (f *fakeAPI) DeleteVersion(_ context.Context, target api.Target, id int64) error {
+	f.deletedTargets = append(f.deletedTargets, target)
 	f.deletedIDs = append(f.deletedIDs, id)
 	return f.deleteErr[id]
 }
@@ -101,12 +101,12 @@ func TestUsesUserPathWhenTokenOwnsPackage(t *testing.T) {
 
 	run(t, options(), versions, &fakeRegistry{})
 
-	want := "/user/packages/container/devcontainer-debian"
-	if got := versions.listedPaths; len(got) != 1 || got[0] != want {
-		t.Errorf("listed paths = %v, want [%s]", got, want)
+	want := api.Target{Owner: "henrytill", PackageName: "devcontainer-debian", UserOwned: true}
+	if got := versions.listedTargets; len(got) != 1 || got[0] != want {
+		t.Errorf("listed targets = %v, want [%+v]", got, want)
 	}
-	if got := versions.deletedPaths; len(got) != 1 || got[0] != want {
-		t.Errorf("deleted paths = %v, want [%s]", got, want)
+	if got := versions.deletedTargets; len(got) != 1 || got[0] != want {
+		t.Errorf("deleted targets = %v, want [%+v]", got, want)
 	}
 }
 
@@ -115,9 +115,9 @@ func TestUsesOrgsPathForSomeoneElsesPackage(t *testing.T) {
 
 	run(t, options(), versions, &fakeRegistry{})
 
-	want := "/orgs/henrytill/packages/container/devcontainer-debian"
-	if got := versions.listedPaths; len(got) != 1 || got[0] != want {
-		t.Errorf("listed paths = %v, want [%s]", got, want)
+	want := api.Target{Owner: "henrytill", PackageName: "devcontainer-debian"}
+	if got := versions.listedTargets; len(got) != 1 || got[0] != want {
+		t.Errorf("listed targets = %v, want [%+v]", got, want)
 	}
 }
 
@@ -193,9 +193,9 @@ func TestSkipsVersionsYoungerThanMinAge(t *testing.T) {
 	}
 }
 
-func TestSkipsVersionsWithAnUnparseableTimestamp(t *testing.T) {
+func TestSkipsVersionsWithNoUsableTimestamp(t *testing.T) {
 	broken := version("sha256:broken", 1, nil, 0)
-	broken.UpdatedAt = "not a timestamp"
+	broken.UpdatedAt = time.Time{}
 	versions := &fakeAPI{
 		login:    "henrytill",
 		versions: []api.ContainerVersion{broken, version("sha256:fine", 2, nil, 0)},
