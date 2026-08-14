@@ -8,12 +8,30 @@
 # separate steps: the standard set below already includes both. Running them
 # twice, at two versions, under two configurations, is how this branch first
 # produced a green Go job alongside a red lint job.
+#
+# Without this file super-linter falls back to its own bundled configuration,
+# which enables the three linters named below on top of the standard set. They
+# are enabled here explicitly rather than lost: adding a config file should not
+# quietly weaken what the repository was already enforcing.
 
 version: '2'
 
 linters:
   # errcheck, govet, ineffassign, staticcheck, unused.
   default: standard
+  enable:
+    - gocyclo
+    - gosec
+    - revive
+  settings:
+    gocyclo:
+      # super-linter's bundled configuration uses 15, and Prune was over it.
+      min-complexity: 15
+  exclusions:
+    paths:
+      # Vendored Go that ships inside an npm package, and not ours to fix. CI
+      # never sees it, but a local run after `npm ci` would.
+      - node_modules
 
 run:
   # The default is a minute, which a cold build of the dependency graph can

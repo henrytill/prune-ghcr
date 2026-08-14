@@ -104,6 +104,7 @@ func TestSetOutputAppendsAHeredocToGithubOutput(t *testing.T) {
 		t.Fatalf("SetOutput: %v", err)
 	}
 
+	// #nosec G304 G703 -- the path is this test's own t.TempDir().
 	contents, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
