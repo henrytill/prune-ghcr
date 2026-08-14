@@ -2,6 +2,7 @@
 
 sources:
   npm: true
+  go: true
 
 allowed:
   - apache-2.0

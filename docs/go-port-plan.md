@@ -10,10 +10,11 @@ The npm dependency surface is the maintenance cost here: Dependabot churn, a
 committed `dist/` guarded by its own workflow. The action itself is ~440 lines
 that make a handful of HTTP calls.
 
-A Go rewrite with no third-party dependencies removes all of that. The cost is
-that Actions has no `runs.using:` that invokes a compiled binary — only
-`node24`, `docker`, and `composite` — so the action ships as a Docker action
-referencing a prebuilt image.
+A Go rewrite removes most of that: no `dist/` to commit or guard, no `overrides`
+check, and a dependency surface of two well-maintained libraries rather than a
+lock file. The cost is that Actions has no `runs.using:` that invokes a compiled
+binary — only `node24`, `docker`, and `composite` — so the action ships as a
+Docker action referencing a prebuilt image.
 
 ## Target shape
 
@@ -24,30 +25,46 @@ internal/api/api.go           <- src/api.ts
 internal/registry/registry.go <- src/registry.ts
 internal/prune/prune.go       <- src/prune.ts
 internal/retry/retry.go       <- src/retry.ts
-internal/httpx/httpx.go       <- no TypeScript counterpart; see below
 Dockerfile                    <- golang builder -> distroless/static
 ```
 
 `distroless/static` rather than `scratch`: we need its CA certificates for TLS
 to ghcr.io and the API.
 
-`internal/httpx` has no counterpart in the TypeScript, where
-`@actions/http-client` filled the role. It holds the request discipline `api`
-and `registry` would otherwise copy between four call sites: the timeout, the
-body close, the `io.LimitReader`, and turning a non-2xx status into an error
-that knows whether retrying could help. The no-default-timeout trap below is the
-reason it is one package rather than a convention.
+`api` and `registry` are thin wrappers over their libraries. What they still own
+is the error vocabulary — converting a failure into one that says whether
+retrying could help — and the conversion from the libraries' types into ones
+`prune` can consume without importing either.
 
-## Dependencies: none
+## Dependencies
 
-`go-containerregistry` would cover `registry.go` and `go-github` would cover
-`api.go`, but both are the wrong call. What we need from the former is one token
-exchange and one GET with an `Accept` header; from the latter, three REST
-endpoints. `go-containerregistry` in particular pulls in a slice of the Docker
-CLI tree, recreating the dependency churn this port exists to remove.
+`google/go-github` covers `api.go` and `google/go-containerregistry` covers
+`registry.go`. An earlier draft of this document argued for the standard library
+alone; that was reversed deliberately, and the reversal is worth recording
+honestly, because the original objection was correct on the facts.
 
-Standard library only means no Dependabot noise, no `.licenses/` regeneration,
-and `govulncheck` running against the toolchain alone.
+What we get:
+
+- `remote.Get` negotiates manifest media types itself, so the hand-maintained
+  `Accept` list is gone, and it **verifies that content hashes to the digest
+  requested** — the hand-rolled client did not.
+- `go-github` parses `updated_at` and follows pagination, and its
+  `WithEnterpriseURLs` already knows that `api.github.com` must not have
+  `/api/v3/` appended while a GHES URL must.
+- The user-versus-organization split becomes a choice of method rather than a
+  hand-built path string, which is harder to get subtly wrong.
+
+What it costs, measured rather than assumed:
+
+- 2 direct requirements, 10 indirect, 50 modules in the full graph. `docker/cli`
+  and `sirupsen/logrus` are in the tree, via `authn`, exactly as the earlier
+  draft predicted.
+- The binary grows from 6.2 MB to 7.0 MB on amd64.
+- `.licenses/` does not go away, it changes ecosystem: `.licensed.yml` gains
+  `go: true` and the cache needs regenerating through the Licensed dispatch.
+- `govulncheck` now has a real dependency surface to scan, which cuts both ways.
+- `go-github` cuts a major roughly monthly and the major is in the import path,
+  so each bump touches source. Dependabot will not group those.
 
 ## Order of work
 
@@ -71,11 +88,17 @@ and `govulncheck` running against the toolchain alone.
    `warn func(string)` parameter rather than a package dependency — the retry
    tests can then assert on the log output without a global.
 3. `internal/api` — the concrete client, with the same three methods.
-   `nextPageUrl` ports as-is. `ContainerVersion` gets json tags. The interface
-   itself does not live here: Go declares interfaces at the consumer, so it
-   moves to `internal/prune` along with `ManifestReader`.
-4. `internal/registry` — token exchange and manifest GET. `MANIFEST_ACCEPT`
-   copies over verbatim; the lowercase-repository rule keeps its comment.
+   `go-github` owns pagination and JSON decoding, so what remains is selecting
+   the user or organization method, converting `PackageVersion` into a
+   `ContainerVersion` prune can use, and decoding the container tags out of
+   `Metadata`, which is a `json.RawMessage` because the same field is an array
+   on webhook payloads. The interface itself does not live here: Go declares
+   interfaces at the consumer, so it moves to `internal/prune` along with
+   `ManifestReader`.
+4. `internal/registry` — `remote.Get` handles the token exchange, the media type
+   negotiation, and digest verification, so `MANIFEST_ACCEPT` does not carry
+   over. The lowercase-repository rule keeps its comment. Auth is lazy now, so a
+   bad token surfaces at the first manifest read rather than at construction.
 5. `internal/prune` — mechanical, since it already takes its collaborators as
    interfaces. It declares `VersionsAPI` and `ManifestReader`, so the test fakes
    live next to the interfaces they satisfy. It also takes a `Logger`, for the
@@ -113,20 +136,21 @@ These are the reasons the action is correct; carry them across unchanged.
 - `src/prune.ts:73` iterates `[...keep].sort()`. In TypeScript the sort is
   arguably cosmetic; in Go, map iteration order is randomized, so
   `slices.Sorted` is load-bearing for reproducible log output.
-- `updated_at` as a `time.Time` is stricter than `Date.parse`. Record one real
-  API payload into `testdata/` and parse that, rather than a hand-written
-  fixture that only contains what we already expect.
-- The direction of that failure matters, and today's is the dangerous one.
+- `updated_at` parsing is stricter than `Date.parse`. `go-github` decodes it
+  into a `Timestamp`, so the failure mode moves: rather than one bad value, a
+  malformed timestamp fails the whole list call. An **absent** one leaves the
+  zero time, which is the dangerous case.
+- The direction of that failure matters, and the original is dangerous.
   `src/prune.ts:88` compares `Date.parse(...) > cutoff`; an unparseable
   `updated_at` yields `NaN`, the comparison is false, and the version gets
-  **deleted**. Do not port that faithfully — a `time.Parse` error should skip
-  the version, on the same "refuse to guess" principle as the unreadable
-  manifest above.
+  **deleted**. The zero time would do the same, being older than any cutoff, so
+  `prune` skips a version whose timestamp is absent, on the same "refuse to
+  guess" principle as the unreadable manifest above.
 - `http.Client{}` has no default timeout, where `@actions/http-client` sets a
   socket timeout. Without an explicit one, a wedged manifest read stops being a
-  retryable failure and becomes a job that hangs to the six-hour limit. Set a
-  timeout, `defer resp.Body.Close()`, and read bodies through an
-  `io.LimitReader`.
+  retryable failure and becomes a job that hangs to the six-hour limit.
+  `go-github` takes `WithTimeout`; go-containerregistry's is bounded by the
+  context.
 - JS number parsing is looser than `strconv`. `src/main.ts:31` uses `Number()`,
   where `Number(' 12 ')` is `12` and `Number('')` is `0`; `ParseFloat` errors on
   both. The `'0'` default hides this until a caller passes
@@ -138,6 +162,9 @@ These are the reasons the action is correct; carry them across unchanged.
   start working. Match the Actions set explicitly.
 - `src/registry.ts` hardcodes `ghcr.io`, so it needs an injectable host before
   `httptest` can reach it. `src/api.ts` already takes a base URL.
+- A test registry must answer the `/v2/` ping and the token endpoint before any
+  manifest read, and must serve content that actually hashes to the digest
+  requested, because `remote.Get` verifies it.
 
 ## Tests
 

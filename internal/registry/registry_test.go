@@ -2,7 +2,8 @@ package registry
 
 import (
 	"context"
-	"encoding/base64"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,154 +13,151 @@ import (
 	"github.com/henrytill/prune-ghcr/internal/retry"
 )
 
-// tokenServer answers the token endpoint with token, and hands every other
-// request to handler.
-func tokenServer(t *testing.T, token string, handler http.HandlerFunc) *httptest.Server {
+const (
+	indexMediaType    = "application/vnd.oci.image.index.v1+json"
+	manifestMediaType = "application/vnd.oci.image.manifest.v1+json"
+)
+
+// registryServer stands in for ghcr.io. It answers the /v2/ ping and the token
+// endpoint that go-containerregistry negotiates before any manifest read, and
+// hands manifest requests to handler.
+func registryServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/token" {
-			w.Write([]byte(`{"token":"` + token + `"}`))
-			return
-		}
-		if handler != nil {
+		switch {
+		case r.URL.Path == "/v2/" || r.URL.Path == "/v2":
+			w.WriteHeader(http.StatusOK)
+		case strings.HasPrefix(r.URL.Path, "/token"):
+			w.Write([]byte(`{"token":"registry-token"}`))
+		default:
 			handler(w, r)
-			return
 		}
-		http.NotFound(w, r)
 	}))
 	t.Cleanup(server.Close)
 	return server
 }
 
-func TestExchangesTheGitHubTokenForAPullScopedRegistryToken(t *testing.T) {
-	var query, authorization string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		query, authorization = r.URL.RawQuery, r.Header.Get("authorization")
-		w.Write([]byte(`{"token":"registry-token"}`))
-	}))
-	defer server.Close()
-
-	_, err := NewClient(context.Background(), server.URL,
-		"HenryTill", "Devcontainer-Debian", "ghp_tok", nil)
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
-
-	// Registry repository paths are lowercase even when the package name is not.
-	if want := "repository%3Ahenrytill%2Fdevcontainer-debian%3Apull"; !strings.Contains(query, want) {
-		t.Errorf("query = %q, want it to contain %q", query, want)
-	}
-	want := "Basic " + base64.StdEncoding.EncodeToString([]byte("HenryTill:ghp_tok"))
-	if authorization != want {
-		t.Errorf("authorization = %q, want %q", authorization, want)
-	}
+// digestOf is the digest go-containerregistry will require the body to have.
+// Unlike the hand-rolled client this replaced, remote.Get verifies that the
+// content actually hashes to the digest requested, so the tests cannot use a
+// made-up one.
+func digestOf(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-func TestFailsWhenTheTokenResponseCarriesNoToken(t *testing.T) {
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.Write([]byte(`{}`))
-	}))
-	defer server.Close()
-
-	_, err := NewClient(context.Background(), server.URL, "henrytill", "p", "ghp_tok", nil)
-
-	if err == nil || !strings.Contains(err.Error(), "no token") {
-		t.Fatalf("error = %v, want one mentioning no token", err)
-	}
-	if calls != 1 {
-		t.Errorf("made %d requests, want 1: a missing token is not retryable", calls)
-	}
+// host strips the scheme, since NewClient takes a registry host.
+func host(server *httptest.Server) string {
+	return strings.TrimPrefix(server.URL, "http://")
 }
 
-func TestRequestsManifestsWithEveryIndexMediaTypeAccepted(t *testing.T) {
-	var path, accept, authorization string
-	server := tokenServer(t, "registry-token", func(w http.ResponseWriter, r *http.Request) {
-		path, accept = r.URL.Path, r.Header.Get("accept")
-		authorization = r.Header.Get("authorization")
-		w.Write([]byte(`{"manifests":[{"digest":"sha256:child"}]}`))
+func TestLowercasesTheRepositoryPath(t *testing.T) {
+	body := `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `"}`
+	var path string
+	server := registryServer(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.Header().Set("Content-Type", manifestMediaType)
+		w.Write([]byte(body))
 	})
 
-	client, err := NewClient(context.Background(), server.URL, "henrytill", "p", "ghp_tok", nil)
+	client, err := NewClient(host(server), "HenryTill", "Devcontainer-Debian", "ghp_tok", nil)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	manifest, err := client.ReadManifest(context.Background(), "sha256:index")
+	if _, err := client.ReadManifest(context.Background(), digestOf(body)); err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+
+	// Registry paths are lowercase even when the owner and package are not.
+	if want := "/v2/henrytill/devcontainer-debian/manifests/"; !strings.HasPrefix(path, want) {
+		t.Errorf("path = %q, want it to start with %q", path, want)
+	}
+}
+
+func TestReturnsTheChildrenOfAnIndex(t *testing.T) {
+	child := "sha256:" + strings.Repeat("b", 64)
+	other := "sha256:" + strings.Repeat("c", 64)
+	index := `{"schemaVersion":2,"mediaType":"` + indexMediaType + `","manifests":[
+		{"mediaType":"` + manifestMediaType + `","digest":"` + child + `","size":1},
+		{"mediaType":"` + manifestMediaType + `","digest":"` + other + `","size":1}
+	]}`
+
+	server := registryServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", indexMediaType)
+		w.Write([]byte(index))
+	})
+
+	client, err := NewClient(host(server), "henrytill", "p", "ghp_tok", nil)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	manifest, err := client.ReadManifest(context.Background(), digestOf(index))
 	if err != nil {
 		t.Fatalf("ReadManifest: %v", err)
 	}
 
-	if len(manifest.Manifests) != 1 || manifest.Manifests[0].Digest != "sha256:child" {
-		t.Errorf("manifest = %+v, want one child sha256:child", manifest)
+	if len(manifest.Manifests) != 2 {
+		t.Fatalf("got %d children, want 2: %+v", len(manifest.Manifests), manifest)
 	}
-	if want := "/v2/henrytill/p/manifests/sha256:index"; path != want {
-		t.Errorf("path = %q, want %q", path, want)
-	}
-	if authorization != "Bearer registry-token" {
-		t.Errorf("authorization = %q, want Bearer registry-token", authorization)
-	}
-	for _, mediaType := range []string{
-		"application/vnd.oci.image.index.v1+json",
-		"application/vnd.docker.distribution.manifest.list.v2+json",
-		"application/vnd.docker.distribution.manifest.v2+json",
-		"application/vnd.oci.image.manifest.v1+json",
-	} {
-		if !strings.Contains(accept, mediaType) {
-			t.Errorf("accept = %q, want it to contain %q", accept, mediaType)
-		}
+	if manifest.Manifests[0].Digest != child || manifest.Manifests[1].Digest != other {
+		t.Errorf("children = %+v, want %s and %s", manifest.Manifests, child, other)
 	}
 }
 
-func TestFailsOnAnErrorStatus(t *testing.T) {
-	server := tokenServer(t, "registry-token", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"errors":[]}`))
+// TestASinglePlatformManifestHasNoChildren covers the case the explicit Accept
+// list used to guard: a non-index manifest must come back empty rather than
+// erroring, so its version is simply kept.
+func TestASinglePlatformManifestHasNoChildren(t *testing.T) {
+	body := `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `","layers":[]}`
+	server := registryServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", manifestMediaType)
+		w.Write([]byte(body))
 	})
 
-	client, err := NewClient(context.Background(), server.URL, "henrytill", "p", "ghp_tok", nil)
+	client, err := NewClient(host(server), "henrytill", "p", "ghp_tok", nil)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
+	manifest, err := client.ReadManifest(context.Background(), digestOf(body))
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
 
-	_, err = client.ReadManifest(context.Background(), "sha256:missing")
-
-	if err == nil || !strings.Contains(err.Error(), "404") {
-		t.Fatalf("error = %v, want one mentioning 404", err)
+	if len(manifest.Manifests) != 0 {
+		t.Errorf("children = %+v, want none", manifest.Manifests)
 	}
 }
 
-func TestRetriesATransientTokenFailure(t *testing.T) {
+func TestFailsOnAnErrorStatusWithoutRetrying(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := registryServer(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		if calls == 1 {
-			w.WriteHeader(http.StatusBadGateway)
-			return
-		}
-		w.Write([]byte(`{"token":"registry-token"}`))
-	}))
-	defer server.Close()
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"errors":[{"code":"MANIFEST_UNKNOWN"}]}`))
+	})
 
-	var warnings []string
-	client, err := NewClient(context.Background(), server.URL, "henrytill", "p", "ghp_tok",
-		func(message string) { warnings = append(warnings, message) })
+	client, err := NewClient(host(server), "henrytill", "p", "ghp_tok", nil)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	if client.token != "registry-token" {
-		t.Errorf("token = %q, want registry-token", client.token)
+	_, err = client.ReadManifest(context.Background(), "sha256:"+strings.Repeat("a", 64))
+
+	if err == nil {
+		t.Fatal("error = nil, want a failure")
 	}
-	if calls != 2 {
-		t.Errorf("made %d requests, want 2", calls)
-	}
-	if len(warnings) != 1 {
-		t.Errorf("warnings = %v, want one", warnings)
+	if calls != 1 {
+		t.Errorf("made %d manifest requests, want 1: a 404 must not be retried", calls)
 	}
 }
 
-// TestMain turns the retry backoff off so the retry test does not sleep.
+func TestRejectsAnUnparseableRepository(t *testing.T) {
+	if _, err := NewClient("ghcr.io", "hen ry", "p", "tok", nil); err == nil {
+		t.Error("NewClient = nil error, want a failure on an invalid repository")
+	}
+}
+
+// TestMain turns the retry backoff off so a retry does not sleep.
 func TestMain(m *testing.M) {
 	retry.DefaultBaseDelay = 0
 	os.Exit(m.Run())

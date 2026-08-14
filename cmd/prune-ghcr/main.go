@@ -70,8 +70,11 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	versions := api.NewClient(token, os.Getenv("GITHUB_API_URL"), actions.Warning)
-	manifests, err := registry.NewClient(ctx, "", owner, packageName, token, actions.Warning)
+	versions, err := api.NewClient(token, os.Getenv("GITHUB_API_URL"), actions.Warning)
+	if err != nil {
+		return err
+	}
+	manifests, err := registry.NewClient("", owner, packageName, token, actions.Warning)
 	if err != nil {
 		return err
 	}

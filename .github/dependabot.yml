@@ -19,6 +19,36 @@ updates:
           - minor
           - patch
 
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    # See the note above. go-github cuts a major roughly monthly, and a major
+    # is never grouped, so expect a steady trickle of individual pull requests
+    # for it -- the import path carries the major, so each one touches source.
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
+    groups:
+      gomod-minor:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      docker-minor:
+        update-types:
+          - minor
+          - patch
+
   - package-ecosystem: npm
     directory: /
     schedule:
