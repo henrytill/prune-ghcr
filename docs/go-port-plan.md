@@ -224,7 +224,7 @@ Consequences to handle:
   action; after the port it produces a runner-level pull failure before our code
   runs. Acceptable, but it is the real cost of the packaging change.
 - Linux runners only — and self-hosted macOS and Windows runners are out too,
-  permanently, for anyone consuming this. Noted in the Readme.
+  permanently, for anyone consuming this. Noted in the readme.
 - `dry-run.yml` uses `./`, so it cannot go green until an image exists that was
   built from the commit being tagged. See the bootstrap in the order of work.
 
