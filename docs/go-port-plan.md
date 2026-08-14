@@ -255,7 +255,12 @@ Consequences to handle:
   by SHA rather than `go run tool@latest`, which was unpinned in a repository
   that pins everything else, and scans with the toolchain in `go.mod` rather
   than the newest one satisfying it.
-- CodeQL supports Go; only the language matrix changes.
+- CodeQL now analyzes Go instead of TypeScript. More than the language matrix
+  changed, contrary to the earlier note here: `source-root: src` had to go,
+  since that is the TypeScript tree; the config file keeps ignoring
+  `node_modules` because an npm package vendors Go sources of its own; and the
+  job sets Go up explicitly, because the extractor builds the module and the
+  runner image will not always ship a toolchain new enough for `go.mod`.
 - `package.json` held the release version of record. Something else has to: a
   `VERSION` file, or the Git tag alone. Note that `action.yml` now carries the
   image digest, so it is already a file `script/release` must write — folding

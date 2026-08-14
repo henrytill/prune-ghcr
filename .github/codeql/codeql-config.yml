@@ -1,5 +1,7 @@
-name: JavaScript CodeQL Configuration
+name: Go CodeQL Configuration
 
 paths-ignore:
+  # An npm package vendors Go sources of its own, which are not ours to analyze
+  # and do not build as part of this module.
   - node_modules
   - dist
