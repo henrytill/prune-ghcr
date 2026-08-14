@@ -33,6 +33,9 @@ manifests the winner uploaded but has not tagged yet. Either serialize the
 publishing workflow with a `concurrency` group, or set `min-age-hours` high
 enough to cover a build.
 
+This is a container action, so it runs on Linux runners only. `amd64` and
+`arm64` are both published.
+
 ### Token
 
 `GITHUB_TOKEN` cannot delete versions of a user-owned package, so this needs a
