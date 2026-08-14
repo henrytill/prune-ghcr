@@ -123,7 +123,7 @@ func TestSendsTheToken(t *testing.T) {
 	var got http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = r.Header.Clone()
-		w.Write([]byte(`{"login":"henrytill"}`))
+		_, _ = w.Write([]byte(`{"login":"henrytill"}`))
 	}))
 	defer server.Close()
 
@@ -152,7 +152,7 @@ func TestUsesTheUserPathWhenTheTokenOwnsThePackage(t *testing.T) {
 			return
 		}
 		listed = r.URL.Path
-		w.Write([]byte(`[]`))
+		_, _ = w.Write([]byte(`[]`))
 	}))
 	defer server.Close()
 
@@ -183,7 +183,7 @@ func TestUsesTheOrgsPathForAPackageOwnedBySomeoneElse(t *testing.T) {
 			return
 		}
 		listed = r.URL.Path
-		w.Write([]byte(`[]`))
+		_, _ = w.Write([]byte(`[]`))
 	}))
 	defer server.Close()
 
@@ -210,11 +210,11 @@ func TestFollowsPaginationToTheLastPage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pages = append(pages, r.URL.Query().Get("page"))
 		if r.URL.Query().Get("page") == "2" {
-			w.Write([]byte(`[{"id":2,"name":"sha256:b"}]`))
+			_, _ = w.Write([]byte(`[{"id":2,"name":"sha256:b"}]`))
 			return
 		}
 		w.Header().Set("Link", `<`+"http://"+r.Host+r.URL.Path+`?page=2>; rel="next"`)
-		w.Write([]byte(`[{"id":1,"name":"sha256:a"}]`))
+		_, _ = w.Write([]byte(`[{"id":1,"name":"sha256:a"}]`))
 	}))
 	defer server.Close()
 
@@ -235,7 +235,7 @@ func TestFollowsPaginationToTheLastPage(t *testing.T) {
 func TestFailsOnAnErrorStatusIncludingTheBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(`{"message":"Forbidden"}`))
+		_, _ = w.Write([]byte(`{"message":"Forbidden"}`))
 	}))
 	defer server.Close()
 
@@ -275,7 +275,7 @@ func TestRetriesATransientFailure(t *testing.T) {
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
-		w.Write([]byte(`{"login":"henrytill"}`))
+		_, _ = w.Write([]byte(`{"login":"henrytill"}`))
 	}))
 	defer server.Close()
 

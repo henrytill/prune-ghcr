@@ -80,14 +80,14 @@ What it costs, measured rather than assumed:
    _property_ values additionally need `%3A` and `%2C`. Adding a command with
    properties means adding that table.
 
-2. `internal/retry` — sets the error vocabulary the rest of the port uses.
+1. `internal/retry` — sets the error vocabulary the rest of the port uses.
    `NonRetryableError` becomes a typed error matched with `errors.As`;
    `statusError(msg, status)` ports directly. Make the base delay injectable so
    tests do not sleep. It goes second, not first: `src/retry.ts:1` imports
    `@actions/core` for the per-attempt `core.warning`. Take that as a
    `warn func(string)` parameter rather than a package dependency — the retry
    tests can then assert on the log output without a global.
-3. `internal/api` — the concrete client, with the same three methods.
+1. `internal/api` — the concrete client, with the same three methods.
    `go-github` owns pagination and JSON decoding, so what remains is selecting
    the user or organization method, converting `PackageVersion` into a
    `ContainerVersion` prune can use, and decoding the container tags out of
@@ -95,18 +95,18 @@ What it costs, measured rather than assumed:
    on webhook payloads. The interface itself does not live here: Go declares
    interfaces at the consumer, so it moves to `internal/prune` along with
    `ManifestReader`.
-4. `internal/registry` — `remote.Get` handles the token exchange, the media type
+1. `internal/registry` — `remote.Get` handles the token exchange, the media type
    negotiation, and digest verification, so `MANIFEST_ACCEPT` does not carry
    over. The lowercase-repository rule keeps its comment. Auth is lazy now, so a
    bad token surfaces at the first manifest read rather than at construction.
-5. `internal/prune` — mechanical, since it already takes its collaborators as
+1. `internal/prune` — mechanical, since it already takes its collaborators as
    interfaces. It declares `VersionsAPI` and `ManifestReader`, so the test fakes
    live next to the interfaces they satisfy. It also takes a `Logger`, for the
    same reason `withRetry` takes a `warn`.
-6. `cmd/prune-ghcr` — input reading and validation, then the failure handling
-   described in step 1.
-7. `Dockerfile` and the image publish workflow.
-8. Bootstrap the image before `action.yml` can reference it. Publish from this
+1. `cmd/prune-ghcr` — input reading and validation, then the failure handling
+   described under `internal/actions` above.
+1. `Dockerfile` and the image publish workflow.
+1. Bootstrap the image before `action.yml` can reference it. Publish from this
    branch under a prerelease tag, point `action.yml` at that digest, and run
    `dry-run.yml` against a real package. This is where the container plumbing
    gets proven, so check it deliberately rather than just reading the exit code:
@@ -114,9 +114,9 @@ What it costs, measured rather than assumed:
    mounts in, `::add-mask::` on stdout still masks, and a non-zero exit still
    fails the step. Run it on `ubuntu-24.04-arm` too, since we publish
    multi-arch.
-9. Delete the npm side, in one commit, once `dry-run` is green.
-10. Cut the real release: publish from the final commit, repoint `action.yml` at
-    that digest, tag.
+1. Delete the npm side, in one commit, once `dry-run` is green.
+1. Cut the real release: publish from the final commit, repoint `action.yml` at
+   that digest, tag.
 
 ## Invariants to preserve
 
@@ -192,7 +192,8 @@ While the port is on the branch, though, `action.yml` does say
 `image: Dockerfile`, because there is no image to reference yet. That is what
 dissolves the bootstrap problem: the action stays runnable from a checkout, so
 `ci.yml`'s existing empty-token job builds the container and proves the plumbing
-before anything is published. The digest replaces it at step 8.
+before anything is published. The digest replaces it at the bootstrap step
+below.
 
 Docker over `composite`, which is the only other way to run a compiled binary. A
 composite action would lift the Linux-only constraint below and drop the
