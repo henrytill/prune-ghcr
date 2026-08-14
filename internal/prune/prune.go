@@ -60,6 +60,84 @@ func target(owner, packageName, login string) api.Target {
 	}
 }
 
+// referenced returns the set of version names that must survive: every tagged
+// version, plus every manifest a tagged index points at.
+//
+// The per-platform and attestation manifests under an image index carry no tags
+// of their own, which is why a naive "delete every untagged version" deletes the
+// contents of the image the tag points at.
+func referenced(
+	ctx context.Context,
+	all []api.ContainerVersion,
+	manifests ManifestReader,
+	log Logger,
+) (map[string]struct{}, error) {
+	keep := make(map[string]struct{})
+	tagged := 0
+	for _, version := range all {
+		if len(version.Tags) > 0 {
+			tagged++
+			keep[version.Name] = struct{}{}
+		}
+	}
+	log.Info(fmt.Sprintf("==> Walking %d tagged manifest(s) for referenced children", tagged))
+
+	// Sorted so the log output is reproducible: map iteration order is
+	// randomized.
+	for _, digest := range slices.Sorted(maps.Keys(keep)) {
+		manifest, err := manifests.ReadManifest(ctx, digest)
+		if err != nil {
+			// Deleting a child of a manifest we could not read would break a
+			// live tag, so refuse to guess.
+			return nil, fmt.Errorf("could not read %s: %w", digest, err)
+		}
+		for _, child := range manifest.Manifests {
+			keep[child.Digest] = struct{}{}
+		}
+	}
+	log.Info(fmt.Sprintf("    keeping %d version(s)", len(keep)))
+
+	return keep, nil
+}
+
+// doomedVersions selects the untagged, unreferenced versions old enough to
+// delete.
+func doomedVersions(
+	all []api.ContainerVersion,
+	keep map[string]struct{},
+	options Options,
+	log Logger,
+) []api.ContainerVersion {
+	cutoff := time.Now().Add(-options.MinAge)
+
+	var doomed []api.ContainerVersion
+	for _, version := range all {
+		if len(version.Tags) > 0 {
+			continue
+		}
+		if _, kept := keep[version.Name]; kept {
+			continue
+		}
+
+		if version.UpdatedAt.IsZero() {
+			// An absent timestamp is unknown, not ancient. The TypeScript
+			// compared NaN here, which is false, so a version whose updated_at
+			// could not be read was deleted; skip it instead, on the same
+			// refusal to guess as the unreadable manifest above.
+			log.Error(fmt.Sprintf("skipping %s (no usable updated_at)", version.Name))
+			continue
+		}
+		if version.UpdatedAt.After(cutoff) {
+			log.Info(fmt.Sprintf("    skipping %s (younger than %s)", version.Name, options.MinAge))
+			continue
+		}
+
+		doomed = append(doomed, version)
+	}
+
+	return doomed
+}
+
 // Prune deletes untagged versions of a container package.
 //
 // Versions referenced by a tagged multi-arch index are preserved: the
@@ -89,56 +167,12 @@ func Prune(
 	}
 	log.Info(fmt.Sprintf("    %d total", len(all)))
 
-	keep := make(map[string]struct{})
-	tagged := 0
-	for _, version := range all {
-		if len(version.Tags) > 0 {
-			tagged++
-			keep[version.Name] = struct{}{}
-		}
+	keep, err := referenced(ctx, all, manifests, log)
+	if err != nil {
+		return result, err
 	}
-	log.Info(fmt.Sprintf("==> Walking %d tagged manifest(s) for referenced children", tagged))
 
-	// Sorted so the log output is reproducible: map iteration order is
-	// randomized.
-	for _, digest := range slices.Sorted(maps.Keys(keep)) {
-		manifest, err := manifests.ReadManifest(ctx, digest)
-		if err != nil {
-			// Deleting a child of a manifest we could not read would break a
-			// live tag, so refuse to guess.
-			return result, fmt.Errorf("could not read %s: %w", digest, err)
-		}
-		for _, child := range manifest.Manifests {
-			keep[child.Digest] = struct{}{}
-		}
-	}
-	log.Info(fmt.Sprintf("    keeping %d version(s)", len(keep)))
-
-	cutoff := time.Now().Add(-options.MinAge)
-	var doomed []api.ContainerVersion
-	for _, version := range all {
-		if len(version.Tags) > 0 {
-			continue
-		}
-		if _, kept := keep[version.Name]; kept {
-			continue
-		}
-
-		if version.UpdatedAt.IsZero() {
-			// An absent timestamp is unknown, not ancient. The TypeScript
-			// compared NaN here, which is false, so a version whose updated_at
-			// could not be read was deleted; skip it instead, on the same
-			// refusal to guess as the unreadable manifest above.
-			log.Error(fmt.Sprintf("skipping %s (no usable updated_at)", version.Name))
-			continue
-		}
-		if version.UpdatedAt.After(cutoff) {
-			log.Info(fmt.Sprintf("    skipping %s (younger than %s)", version.Name, options.MinAge))
-			continue
-		}
-
-		doomed = append(doomed, version)
-	}
+	doomed := doomedVersions(all, keep, options, log)
 
 	result.Total = len(all)
 	result.Kept = len(all) - len(doomed)

@@ -84,7 +84,13 @@ func SetOutput(name string, value string) error {
 		return fmt.Errorf("output %s contains the generated delimiter", name)
 	}
 
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+	// The path is GITHUB_OUTPUT, set by the runner, not by any action input.
+	// #nosec G304 G703 -- not attacker-controlled.
+	//
+	// The mode applies only if the file does not exist, which on a runner it
+	// always does: the runner creates it, and O_CREATE is here for local runs
+	// outside one.
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening GITHUB_OUTPUT: %w", err)
 	}

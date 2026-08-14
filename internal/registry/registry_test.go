@@ -82,7 +82,7 @@ func TestReturnsTheChildrenOfAnIndex(t *testing.T) {
 		{"mediaType":"` + manifestMediaType + `","digest":"` + other + `","size":1}
 	]}`
 
-	server := registryServer(t, func(w http.ResponseWriter, r *http.Request) {
+	server := registryServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", indexMediaType)
 		_, _ = w.Write([]byte(index))
 	})
@@ -109,7 +109,7 @@ func TestReturnsTheChildrenOfAnIndex(t *testing.T) {
 // erroring, so its version is simply kept.
 func TestASinglePlatformManifestHasNoChildren(t *testing.T) {
 	body := `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `","layers":[]}`
-	server := registryServer(t, func(w http.ResponseWriter, r *http.Request) {
+	server := registryServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", manifestMediaType)
 		_, _ = w.Write([]byte(body))
 	})
@@ -130,7 +130,7 @@ func TestASinglePlatformManifestHasNoChildren(t *testing.T) {
 
 func TestFailsOnAnErrorStatusWithoutRetrying(t *testing.T) {
 	calls := 0
-	server := registryServer(t, func(w http.ResponseWriter, r *http.Request) {
+	server := registryServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"errors":[{"code":"MANIFEST_UNKNOWN"}]}`))

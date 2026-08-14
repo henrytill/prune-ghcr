@@ -22,7 +22,15 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 # static rather than scratch: the CA certificates are needed for TLS to the API
 # and the registry. The default (root) user rather than :nonroot, because the
 # runner mounts $GITHUB_OUTPUT into the container and it has to stay writable.
-FROM gcr.io/distroless/static-debian13
+#
+# Pinned by digest rather than tag: distroless publishes no version tags for
+# this image, only :latest, and a floating base would undo the point of pinning
+# the action itself by digest.
+#
+# checkov:skip=CKV_DOCKER_3: running as root is the deliberate choice above.
+# checkov:skip=CKV_DOCKER_2: a healthcheck is meaningless for a container that
+# runs once to completion and exits.
+FROM gcr.io/distroless/static-debian13@sha256:9197324ba51d9cd071af8505989365c006adf9d6d2067eada25aef00abbb5278
 
 COPY --from=build /out/prune-ghcr /prune-ghcr
 

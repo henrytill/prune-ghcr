@@ -4,6 +4,11 @@ name: Publish Image
 # action.yml must reference: a floating tag would mean a consumer pinning this
 # action by commit SHA still got whatever was pushed to that tag last.
 on:
+  # checkov:skip=CKV_GHA_7: the input names the tag the image is published
+  # under, not anything the build reads. The build entry point is the committed
+  # Dockerfile and the source is this checkout, both of which the input cannot
+  # reach. The dispatch exists so the first image can be published before any
+  # release tag exists.
   workflow_dispatch:
     inputs:
       tag:

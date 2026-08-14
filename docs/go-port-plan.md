@@ -12,7 +12,7 @@ that make a handful of HTTP calls.
 
 A Go rewrite removes most of that: no `dist/` to commit or guard, no `overrides`
 check, and a dependency surface of two well-maintained libraries rather than a
-lock file. The cost is that Actions has no `runs.using:` that invokes a compiled
+lockfile. The cost is that Actions has no `runs.using:` that invokes a compiled
 binary — only `node24`, `docker`, and `composite` — so the action ships as a
 Docker action referencing a prebuilt image.
 
@@ -141,7 +141,7 @@ These are the reasons the action is correct; carry them across unchanged.
   malformed timestamp fails the whole list call. An **absent** one leaves the
   zero time, which is the dangerous case.
 - The direction of that failure matters, and the original is dangerous.
-  `src/prune.ts:88` compares `Date.parse(...) > cutoff`; an unparseable
+  `src/prune.ts:88` compares `Date.parse(...) > cutoff`; an unparsable
   `updated_at` yields `NaN`, the comparison is false, and the version gets
   **deleted**. The zero time would do the same, being older than any cutoff, so
   `prune` skips a version whose timestamp is absent, on the same "refuse to
@@ -224,7 +224,7 @@ Consequences to handle:
   action; after the port it produces a runner-level pull failure before our code
   runs. Acceptable, but it is the real cost of the packaging change.
 - Linux runners only — and self-hosted macOS and Windows runners are out too,
-  permanently, for anyone consuming this. README line added.
+  permanently, for anyone consuming this. Noted in the Readme.
 - `dry-run.yml` uses `./`, so it cannot go green until an image exists that was
   built from the commit being tagged. See the bootstrap in the order of work.
 
@@ -257,7 +257,7 @@ Consequences to handle:
   than the newest one satisfying it.
 - CodeQL supports Go; only the language matrix changes.
 - `package.json` held the release version of record. Something else has to: a
-  `VERSION` file, or the git tag alone. Note that `action.yml` now carries the
+  `VERSION` file, or the Git tag alone. Note that `action.yml` now carries the
   image digest, so it is already a file `script/release` must write — folding
   the version into the same step is cheaper than a separate `VERSION`.
 - `CLAUDE.md` needs a rewrite once the port lands. Most of it describes npm

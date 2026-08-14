@@ -233,7 +233,7 @@ func TestFollowsPaginationToTheLastPage(t *testing.T) {
 }
 
 func TestFailsOnAnErrorStatusIncludingTheBody(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"message":"Forbidden"}`))
 	}))
@@ -251,7 +251,7 @@ func TestFailsOnAnErrorStatusIncludingTheBody(t *testing.T) {
 
 func TestDoesNotRetryAPermanentFailure(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		w.WriteHeader(http.StatusNotFound)
 	}))
@@ -269,7 +269,7 @@ func TestDoesNotRetryAPermanentFailure(t *testing.T) {
 
 func TestRetriesATransientFailure(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		if calls == 1 {
 			w.WriteHeader(http.StatusBadGateway)
