@@ -54,6 +54,16 @@ jobs:
           VALIDATE_ALL_CODEBASE: true
           VALIDATE_BIOME_FORMAT: false
           VALIDATE_BIOME_LINT: false
+          # Neither Go mode works on this layout. VALIDATE_GO lints individual
+          # files, so it hands golangci-lint paths from several packages at
+          # once ("named files must all be in one directory"); upstream's own
+          # guidance is to turn it off for a module. VALIDATE_GO_MODULES then
+          # runs at the module root, which holds no .go files of its own ("no
+          # go files to analyze"). The Continuous Integration workflow runs
+          # golangci-lint over ./... instead, at a pinned version, against the
+          # same .golangci.yml.
+          VALIDATE_GO: false
+          VALIDATE_GO_MODULES: false
           VALIDATE_JAVASCRIPT_ES: false
           VALIDATE_JSCPD: false
           VALIDATE_TYPESCRIPT_ES: false
