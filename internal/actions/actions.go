@@ -50,8 +50,10 @@ var escapeData = strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A").Repla
 // issue writes a workflow command. Only the property-less form is implemented,
 // because it is the only one this action uses; adding properties would mean a
 // second escaping table that also covers : and comma.
+// A failed write to the log is deliberately dropped: there is nowhere left to
+// report it, and the run should not fail because an annotation did not print.
 func issue(command, message string) {
-	fmt.Fprintf(out, "::%s::%s\n", command, escapeData(message))
+	_, _ = fmt.Fprintf(out, "::%s::%s\n", command, escapeData(message))
 }
 
 // SetSecret registers a value to be masked in the log.
@@ -64,7 +66,7 @@ func Warning(message string) { issue("warning", message) }
 func Error(message string) { issue("error", message) }
 
 // Info writes a plain log line.
-func Info(message string) { fmt.Fprintln(out, message) }
+func Info(message string) { _, _ = fmt.Fprintln(out, message) }
 
 // SetOutput sets an action output by appending to the file named by
 // GITHUB_OUTPUT.
@@ -88,7 +90,7 @@ func SetOutput(name string, value string) error {
 	}
 
 	if _, err := fmt.Fprintf(file, "%s<<%s\n%s\n%s\n", name, delimiter, value, delimiter); err != nil {
-		file.Close()
+		_ = file.Close()
 		return fmt.Errorf("writing to GITHUB_OUTPUT: %w", err)
 	}
 	return file.Close()

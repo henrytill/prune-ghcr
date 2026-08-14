@@ -28,7 +28,7 @@ func registryServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 		case r.URL.Path == "/v2/" || r.URL.Path == "/v2":
 			w.WriteHeader(http.StatusOK)
 		case strings.HasPrefix(r.URL.Path, "/token"):
-			w.Write([]byte(`{"token":"registry-token"}`))
+			_, _ = w.Write([]byte(`{"token":"registry-token"}`))
 		default:
 			handler(w, r)
 		}
@@ -57,7 +57,7 @@ func TestLowercasesTheRepositoryPath(t *testing.T) {
 	server := registryServer(t, func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
 		w.Header().Set("Content-Type", manifestMediaType)
-		w.Write([]byte(body))
+		_, _ = w.Write([]byte(body))
 	})
 
 	client, err := NewClient(host(server), "HenryTill", "Devcontainer-Debian", "ghp_tok", nil)
@@ -84,7 +84,7 @@ func TestReturnsTheChildrenOfAnIndex(t *testing.T) {
 
 	server := registryServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", indexMediaType)
-		w.Write([]byte(index))
+		_, _ = w.Write([]byte(index))
 	})
 
 	client, err := NewClient(host(server), "henrytill", "p", "ghp_tok", nil)
@@ -111,7 +111,7 @@ func TestASinglePlatformManifestHasNoChildren(t *testing.T) {
 	body := `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `","layers":[]}`
 	server := registryServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", manifestMediaType)
-		w.Write([]byte(body))
+		_, _ = w.Write([]byte(body))
 	})
 
 	client, err := NewClient(host(server), "henrytill", "p", "ghp_tok", nil)
@@ -133,7 +133,7 @@ func TestFailsOnAnErrorStatusWithoutRetrying(t *testing.T) {
 	server := registryServer(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"errors":[{"code":"MANIFEST_UNKNOWN"}]}`))
+		_, _ = w.Write([]byte(`{"errors":[{"code":"MANIFEST_UNKNOWN"}]}`))
 	})
 
 	client, err := NewClient(host(server), "henrytill", "p", "ghp_tok", nil)
