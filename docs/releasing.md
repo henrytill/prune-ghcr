@@ -58,22 +58,66 @@ current release fine.
 Running the action against its own package is safe only for versions no release
 references.
 
-## Goal: reproducible builds
+## Reproducible builds
 
-Making the image bit-reproducible would dissolve the ordering constraint rather
-than manage it. If rebuilding the same source yields the same digest, then the
-image built before the digest commit and the image built from the digest commit
-are the same artifact, and:
+The image is bit-reproducible: rebuilding a commit yields the digest that commit
+published. That makes the image built before the digest commit and the image
+built from the digest commit the same artifact, and it means anyone can rebuild
+and confirm the published image matches the source, which is the real prize.
 
-- a release tag could rebuild and verify itself, instead of the order being a
-  rule people follow
-- anyone could rebuild and confirm the published image matches the source, which
-  is the real prize
+What gets it there:
 
-The pieces are mostly in place already — `-trimpath`, a pinned toolchain, a base
-image pinned by digest, and `provenance: false`. What is missing is timestamp
-determinism: `SOURCE_DATE_EPOCH` with buildx's `rewrite-timestamp`.
+- `-trimpath` and `CGO_ENABLED=0`, so the Go binary does not embed build paths
+- a pinned toolchain and a base image pinned by digest
+- `provenance: false`, since an attestation records the time it was made
+- `SOURCE_DATE_EPOCH`, taken from the commit date — the one clock a third party
+  rebuilding that commit also has
+- buildx's `rewrite-timestamp`, which is why `publish-image.yml` passes
+  `outputs: type=image,push=true,...` rather than `push: true`
 
-It is deliberately not load-bearing today. A single source of nondeterminism
-would break it silently, and the failure would surface at release time, so the
-ordering rule above stays even once this lands.
+The last two go together. `SOURCE_DATE_EPOCH` alone fixes the created time in
+the image config, but the layers `COPY` produces still carry the build time, and
+those are what the digest is over.
+
+### Reproducing a published image
+
+The label is a build input, so it has to be the **original** commit, not the
+checkout's:
+
+```bash
+git checkout <the commit being reproduced>
+rev=$(git rev-parse HEAD)
+
+# The default docker driver cannot build more than one platform at a time.
+docker buildx create --use --driver docker-container
+
+SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct "$rev") \
+  docker buildx build . \
+    --platform linux/amd64,linux/arm64 \
+    --label "org.opencontainers.image.revision=${rev}" \
+    --provenance=false \
+    --output type=oci,dest=./image,tar=false,rewrite-timestamp=true
+
+jq -r '.manifests[0].digest' image/index.json   # compare with action.yml
+```
+
+`--provenance=false`, with the equals sign: the flag takes an optional value, so
+a space-separated `false` is parsed as a build context, not as the value.
+
+Reproducing someone else's build from a checkout of a different commit will not
+match, and should not: the revision label is what makes a digest auditable back
+to a commit.
+
+### The ordering rule stays
+
+CI builds every pull request twice — second pass with `no-cache`, or the rebuild
+replays the first one's layers and compares a result against itself — and fails
+if the digests differ. That is what keeps this honest: a single new source of
+nondeterminism would otherwise break reproducibility silently and only surface
+at release time.
+
+But the release still does not verify itself. Reproducibility could in principle
+dissolve the ordering constraint rather than manage it, by having a release tag
+rebuild and check its own digest. Until something actually does that, **publish,
+merge, then tag** remains a rule people follow, and `script/release` remains the
+only thing enforcing it.
