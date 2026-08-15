@@ -60,6 +60,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Staged rather than `git diff --quiet`, which does not see untracked
+          # files: a cache generated into a directory that does not exist yet
+          # would look like no change at all, and be silently discarded.
+          git add --intent-to-add .licenses
           if git diff --quiet -- .licenses; then
             echo "License cache is already up to date; nothing to open."
             exit 0
