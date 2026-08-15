@@ -203,8 +203,7 @@ func convert(version *github.PackageVersion) (ContainerVersion, error) {
 	if len(version.Metadata) > 0 {
 		var metadata github.PackageMetadata
 		if err := json.Unmarshal(version.Metadata, &metadata); err != nil {
-			return converted, &retry.NonRetryableError{
-				Message: fmt.Sprintf("decoding metadata of %s: %s", converted.Name, err)}
+			return converted, fmt.Errorf("decoding metadata of %s: %w", converted.Name, err)
 		}
 		if metadata.Container != nil {
 			converted.Tags = metadata.Container.Tags
