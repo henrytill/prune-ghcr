@@ -1,18 +1,19 @@
 # See: https://golangci-lint.run/usage/configuration/
 #
-# This is the single source of truth for Go static analysis. super-linter runs
-# golangci-lint for Go and reads this file by default (GO_CONFIG_FILE), so the
-# same configuration applies in CI and to `golangci-lint run` locally.
+# This is the single source of truth for Go static analysis and formatting,
+# read by the Lint step in ci.yml and by `golangci-lint run` locally.
+# super-linter does not lint Go at all: VALIDATE_GO and VALIDATE_GO_MODULES are
+# off, because neither mode can lint a multi-package module.
 #
 # The Go job in ci.yml deliberately does not run `go vet` or `staticcheck` as
 # separate steps: the standard set below already includes both. Running them
 # twice, at two versions, under two configurations, is how this branch first
 # produced a green Go job alongside a red lint job.
 #
-# Without this file super-linter falls back to its own bundled configuration,
-# which enables the three linters named below on top of the standard set. They
-# are enabled here explicitly rather than lost: adding a config file should not
-# quietly weaken what the repository was already enforcing.
+# The three linters enabled on top of the standard set are the ones
+# super-linter's bundled configuration used to enable, back when it did lint Go.
+# They are kept explicitly rather than dropped: taking ownership of the
+# configuration should not quietly weaken what the repository already enforced.
 
 version: '2'
 
@@ -27,6 +28,14 @@ linters:
     gocyclo:
       # super-linter's bundled configuration uses 15, and Prune was over it.
       min-complexity: 15
+
+# Formatting is checked by `golangci-lint run` and applied by `golangci-lint
+# fmt`, which replaces the hand-rolled gofmt step ci.yml used to carry. In v2
+# formatters are their own section: gofmt is no longer selectable under
+# `linters`.
+formatters:
+  enable:
+    - gofmt
 
 run:
   # The default is a minute, which a cold build of the dependency graph can
