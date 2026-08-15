@@ -5,15 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/go-github/v90/github"
-
-	"github.com/henrytill/prune-ghcr/internal/retry"
 )
 
 // testPrefix is what WithEnterpriseURLs appends to a base URL whose host does
@@ -22,13 +19,15 @@ import (
 // test server on 127.0.0.1 gets the suffix, so the assertions carry it.
 const testPrefix = "/api/v3"
 
-// newTestClient points a client at a test server.
+// newTestClient points a client at a test server, with the retry backoff
+// turned off so a retry does not sleep.
 func newTestClient(t *testing.T, server *httptest.Server) *Client {
 	t.Helper()
 	client, err := NewClient("tok", server.URL+"/", nil)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
+	client.baseDelay = 0
 	return client
 }
 
@@ -322,6 +321,7 @@ func TestRetriesATransientFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
+	client.baseDelay = 0
 
 	login, err := client.AuthenticatedLogin(context.Background())
 	if err != nil {
@@ -337,10 +337,4 @@ func TestRetriesATransientFailure(t *testing.T) {
 	if len(warnings) != 1 {
 		t.Errorf("warnings = %v, want one", warnings)
 	}
-}
-
-// TestMain turns the retry backoff off so the retry test does not sleep.
-func TestMain(m *testing.M) {
-	retry.DefaultBaseDelay = 0
-	os.Exit(m.Run())
 }

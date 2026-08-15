@@ -51,6 +51,9 @@ type ContainerVersion struct {
 type Client struct {
 	github *github.Client
 	warn   func(string)
+	// baseDelay is the retry backoff unit. It exists so the tests can zero
+	// it; everything else leaves it at retry.DefaultBaseDelay.
+	baseDelay time.Duration
 }
 
 // NewClient returns a client authenticating with token against baseURL.
@@ -73,7 +76,15 @@ func NewClient(token, baseURL string, warn func(string)) (*Client, error) {
 		return nil, fmt.Errorf("configuring the API client: %w", err)
 	}
 
-	return &Client{github: client, warn: warn}, nil
+	return &Client{github: client, warn: warn, baseDelay: retry.DefaultBaseDelay}, nil
+}
+
+// retryOptions builds the retry configuration for one operation, carrying the
+// client's backoff unit.
+func (c *Client) retryOptions(what string) retry.Options {
+	options := retry.New(what, c.warn)
+	options.BaseDelay = c.baseDelay
+	return options
 }
 
 // statusError converts a go-github failure into an error that says whether
@@ -103,7 +114,7 @@ func (c *Client) AuthenticatedLogin(ctx context.Context) (string, error) {
 			return "", statusError(response, err)
 		}
 		return user.GetLogin(), nil
-	}, retry.New("GET /user", c.warn))
+	}, c.retryOptions("GET /user"))
 }
 
 // versionsPage carries a page of results together with the cursor to the next,
@@ -130,7 +141,7 @@ func (c *Client) ListVersions(ctx context.Context, target Target) ([]ContainerVe
 				next = response.NextPage
 			}
 			return versionsPage{versions: found, nextPage: next}, nil
-		}, retry.New("list versions", c.warn))
+		}, c.retryOptions("list versions"))
 		if err != nil {
 			return nil, err
 		}
@@ -183,7 +194,7 @@ func (c *Client) DeleteVersion(ctx context.Context, target Target, id int64) err
 			return struct{}{}, statusError(response, err)
 		}
 		return struct{}{}, nil
-	}, retry.New(fmt.Sprintf("delete version %d", id), c.warn))
+	}, c.retryOptions(fmt.Sprintf("delete version %d", id)))
 	return err
 }
 

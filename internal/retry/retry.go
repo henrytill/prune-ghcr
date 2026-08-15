@@ -12,10 +12,8 @@ import (
 // DefaultAttempts is the total number of attempts, including the first.
 const DefaultAttempts = 3
 
-// DefaultBaseDelay is multiplied by the attempt number for each backoff. It is
-// a var so that tests of the packages that build their own Options can turn the
-// backoff off rather than sleep through it.
-var DefaultBaseDelay = 2 * time.Second
+// DefaultBaseDelay is multiplied by the attempt number for each backoff.
+const DefaultBaseDelay = 2 * time.Second
 
 // NonRetryableError is an error that retrying cannot fix, such as a 403 from
 // the API.
