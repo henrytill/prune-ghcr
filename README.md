@@ -114,10 +114,10 @@ file for the action to append its outputs to.
 
 ### Releasing
 
-The action runs from a prebuilt image, referenced by digest, so an image must be
-published from a commit before that commit is tagged. `script/release` asks
-about this because getting the order wrong ships older code under a newer
-version.
+The action runs from a prebuilt image referenced by digest, so an image must be
+published before the commit that references it is tagged. `script/release`
+verifies this rather than trusting it. See
+[docs/releasing.md](docs/releasing.md) for the reasoning and the full order.
 
 ## License
 
