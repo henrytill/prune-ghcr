@@ -170,6 +170,9 @@ func TestStopsWhenTheContextIsCancelled(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context.Canceled", err)
 	}
+	if !strings.Contains(err.Error(), "down") {
+		t.Errorf("error = %v, want it to keep the failure being retried", err)
+	}
 	if calls != 1 {
 		t.Errorf("called %d times, want 1: the backoff must not outlive the context", calls)
 	}
