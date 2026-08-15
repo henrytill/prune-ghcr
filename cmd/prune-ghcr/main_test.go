@@ -23,6 +23,12 @@ func TestParseMinAge(t *testing.T) {
 		{input: "NaN", wantErr: true},
 		{input: "Inf", wantErr: true},
 		{input: "-Inf", wantErr: true},
+		// The largest hour count that fits in a time.Duration; anything above
+		// it would overflow into a negative min-age and silently skip every
+		// version.
+		{input: "2562047", want: 2562047 * time.Hour},
+		{input: "2562048", wantErr: true},
+		{input: "1e15", wantErr: true},
 	}
 
 	for _, test := range tests {

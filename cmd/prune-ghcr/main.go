@@ -125,5 +125,12 @@ func parseMinAge(input string) (time.Duration, error) {
 	if err != nil || math.IsNaN(hours) || math.IsInf(hours, 0) || hours < 0 {
 		return 0, fmt.Errorf("min-age-hours must be a non-negative number, got '%s'", input)
 	}
+	// Beyond this the conversion below overflows to a negative duration, and a
+	// negative min-age skips every version as younger than a cutoff centuries
+	// in the past -- a silent no-op where the user asked for the opposite.
+	const maxHours = math.MaxInt64 / int64(time.Hour)
+	if hours > float64(maxHours) {
+		return 0, fmt.Errorf("min-age-hours must be at most %d, got '%s'", maxHours, input)
+	}
 	return time.Duration(hours * float64(time.Hour)), nil
 }
