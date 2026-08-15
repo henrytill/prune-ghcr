@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/henrytill/prune-ghcr/internal/retry"
 )
 
 const (
@@ -145,6 +147,31 @@ func TestFailsOnAnErrorStatusWithoutRetrying(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("made %d manifest requests, want 1: a 404 must not be retried", calls)
+	}
+}
+
+// TestRetriesATransientStatusOnlyThroughTheSharedBackoff guards the
+// WithRetryBackoff(Steps: 1) option: go-containerregistry retries transient
+// failures itself unless told not to, so without it a persistent 502 would be
+// requested nine times -- three invisible transport retries under each of
+// retry.Do's three attempts.
+func TestRetriesATransientStatusOnlyThroughTheSharedBackoff(t *testing.T) {
+	calls := 0
+	server := registryServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"errors":[{"code":"UNAVAILABLE"}]}`))
+	})
+
+	client := newTestClient(t, server, "henrytill", "p")
+
+	_, err := client.ReadManifest(context.Background(), "sha256:"+strings.Repeat("a", 64))
+
+	if err == nil {
+		t.Fatal("error = nil, want a failure")
+	}
+	if want := retry.DefaultAttempts; calls != want {
+		t.Errorf("made %d manifest requests, want %d: only retry.Do may retry", calls, want)
 	}
 }
 

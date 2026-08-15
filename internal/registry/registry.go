@@ -70,6 +70,12 @@ func NewClient(
 		repository: repository,
 		options: []remote.Option{
 			remote.WithAuth(&authn.Basic{Username: owner, Password: githubToken}),
+			// One attempt: go-containerregistry otherwise retries transient
+			// failures itself, three times with its own backoff, invisibly --
+			// its retry log is discarded by default. Stacked under retry.Do
+			// that means up to nine requests per read, so retrying is left to
+			// internal/retry alone, which also warns per retry.
+			remote.WithRetryBackoff(remote.Backoff{Steps: 1}),
 		},
 		backoff: retry.NewBackoff(warn),
 	}, nil
