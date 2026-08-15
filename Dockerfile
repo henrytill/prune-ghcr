@@ -2,7 +2,7 @@
 
 # The builder is pinned to the toolchain in go.mod. TARGETOS and TARGETARCH are
 # supplied by buildx, so one Dockerfile covers both amd64 and arm64.
-FROM --platform=$BUILDPLATFORM golang:1.26.6-trixie AS build
+FROM --platform=$BUILDPLATFORM golang:1.27rc1-trixie AS build
 
 WORKDIR /src
 
