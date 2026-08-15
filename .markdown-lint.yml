@@ -8,6 +8,11 @@ MD004:
 MD013:
   tables: false
 
+# Go is tab-indented by definition, and gofmt will always produce tabs, so
+# fenced Go examples cannot satisfy this rule.
+MD010:
+  code_blocks: false
+
 # Ordered list item prefix
 MD029:
   style: one
