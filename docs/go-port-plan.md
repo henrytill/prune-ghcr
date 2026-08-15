@@ -100,7 +100,7 @@ What it costs, measured rather than assumed:
    over. The lowercase-repository rule keeps its comment. Auth is lazy now, so a
    bad token surfaces at the first manifest read rather than at construction.
 1. `internal/prune` — mechanical, since it already takes its collaborators as
-   interfaces. It declares `VersionsAPI` and `ManifestReader`, so the test fakes
+   interfaces. It declares `Versions` and `ManifestReader`, so the test fakes
    live next to the interfaces they satisfy. It also takes a `Logger`, for the
    same reason `withRetry` takes a `warn`.
 1. `cmd/prune-ghcr` — input reading and validation, then the failure handling

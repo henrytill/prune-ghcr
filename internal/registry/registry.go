@@ -172,7 +172,7 @@ func (c *Client) ReadManifest(ctx context.Context, reference string) (Manifest, 
 func classify(err error) error {
 	var transportErr *transport.Error
 	if errors.As(err, &transportErr) {
-		return retry.StatusError(err.Error(), transportErr.StatusCode)
+		return retry.NewStatusError(err.Error(), transportErr.StatusCode)
 	}
 	return err
 }

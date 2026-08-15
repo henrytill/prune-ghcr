@@ -130,11 +130,11 @@ func TestTreatsTransientStatusesAsRetryableAndTheRestAsPermanent(t *testing.T) {
 	}
 
 	var nonRetryable *NonRetryableError
-	if errors.As(StatusError("m", 502), &nonRetryable) {
-		t.Error("StatusError(502) is non-retryable, want retryable")
+	if errors.As(NewStatusError("m", 502), &nonRetryable) {
+		t.Error("NewStatusError(502) is non-retryable, want retryable")
 	}
-	if !errors.As(StatusError("m", 404), &nonRetryable) {
-		t.Error("StatusError(404) is retryable, want non-retryable")
+	if !errors.As(NewStatusError("m", 404), &nonRetryable) {
+		t.Error("NewStatusError(404) is retryable, want non-retryable")
 	}
 }
 
