@@ -126,7 +126,9 @@ func Do[T any](ctx context.Context, fn func(context.Context) (T, error), opts Op
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return zero, ctx.Err()
+			// Joined so a cancelled run still reports what it was retrying,
+			// not just "context canceled".
+			return zero, errors.Join(ctx.Err(), err)
 		case <-timer.C:
 		}
 	}
