@@ -83,15 +83,19 @@ func isLoopback(host string) bool {
 		strings.HasPrefix(host, "[::1]:")
 }
 
-// ReadManifest fetches a manifest by digest or tag.
+// labelWidth truncates a digest for log lines: "sha256:" plus twelve hex
+// characters, the abbreviation docker itself prints.
+const labelWidth = len("sha256:") + 12
+
+// ReadManifest fetches a manifest by digest.
 //
 // remote.Get negotiates the media types itself, so the explicit Accept list the
 // hand-rolled client carried is no longer spelled out here; a single-platform
 // manifest simply comes back with no children.
 func (c *Client) ReadManifest(ctx context.Context, reference string) (Manifest, error) {
 	label := reference
-	if len(label) > 19 {
-		label = label[:19]
+	if len(label) > labelWidth {
+		label = label[:labelWidth]
 	}
 
 	return retry.Do(ctx, func(ctx context.Context) (Manifest, error) {
