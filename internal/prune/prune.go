@@ -13,8 +13,8 @@ import (
 	"github.com/henrytill/prune-ghcr/internal/registry"
 )
 
-// VersionsAPI is the subset of the packages API this package depends on.
-type VersionsAPI interface {
+// Versions is the subset of the packages API this package depends on.
+type Versions interface {
 	AuthenticatedLogin(ctx context.Context) (string, error)
 	ListVersions(ctx context.Context, target api.Target) ([]api.ContainerVersion, error)
 	DeleteVersion(ctx context.Context, target api.Target, id int64) error
@@ -154,7 +154,7 @@ func doomedVersions(
 func Prune(
 	ctx context.Context,
 	options Options,
-	versions VersionsAPI,
+	versions Versions,
 	manifests ManifestReader,
 	log Logger,
 ) (Result, error) {

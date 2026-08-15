@@ -40,9 +40,9 @@ func IsRetryableStatus(status int) bool {
 	return status == 408 || status == 429 || status >= 500
 }
 
-// StatusError builds an error for a failed request, marking it retryable or
+// NewStatusError builds an error for a failed request, marking it retryable or
 // not by status.
-func StatusError(message string, status int) error {
+func NewStatusError(message string, status int) error {
 	if IsRetryableStatus(status) {
 		return errors.New(message)
 	}

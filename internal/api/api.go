@@ -102,7 +102,7 @@ func statusError(response *github.Response, err error) error {
 	if response == nil || response.Response == nil {
 		return err
 	}
-	return retry.StatusError(err.Error(), response.StatusCode)
+	return retry.NewStatusError(err.Error(), response.StatusCode)
 }
 
 // rateLimitError makes a rate limit retryable after its own wait, or a
