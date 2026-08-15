@@ -285,6 +285,33 @@ func TestRetriesARateLimit(t *testing.T) {
 	}
 }
 
+// TestDoesNotWaitOutALongRateLimit guards the other side of the carve-out: a
+// limit resetting beyond maxRateLimitWait would stall the job, and go-github's
+// client-side limiter would short-circuit the retries anyway, so it must fail
+// on the first attempt.
+func TestDoesNotWaitOutALongRateLimit(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("X-RateLimit-Limit", "60")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset",
+			strconv.FormatInt(time.Now().Add(30*time.Minute).Unix(), 10))
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+	}))
+	defer server.Close()
+
+	_, err := newTestClient(t, server).AuthenticatedLogin(context.Background())
+
+	if err == nil || !strings.Contains(err.Error(), "not waiting") {
+		t.Fatalf("error = %v, want one mentioning not waiting", err)
+	}
+	if calls != 1 {
+		t.Errorf("made %d requests, want 1: a distant reset must not be retried", calls)
+	}
+}
+
 func TestDoesNotRetryAPermanentFailure(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

@@ -87,23 +87,43 @@ func (c *Client) retryOptions(what string) retry.Options {
 	return options
 }
 
+// maxRateLimitWait bounds how long a rate limit is worth waiting out. A
+// secondary limit's Retry-After is typically under a minute, which this
+// covers; a primary limit resetting further out than this would stall the job
+// for most of an hour, and go-github's client-side limiter would short-circuit
+// the retries anyway, so it fails immediately instead.
+const maxRateLimitWait = 2 * time.Minute
+
 // statusError converts a go-github failure into an error that says whether
 // retrying could help, so a 403 or 404 fails immediately instead of burning
 // the backoff.
 //
-// Rate limits stay retryable even though they answer 403: go-github reports
-// them as their own error types, and unlike a permissions 403, waiting is
-// exactly what fixes them.
+// Rate limits answer 403 like a permissions failure, but go-github reports
+// them as their own error types carrying their own reset times, so they are
+// mapped to the delay that actually fixes them rather than failing.
 func statusError(response *github.Response, err error) error {
 	var rateLimited *github.RateLimitError
 	var abuseLimited *github.AbuseRateLimitError
-	if errors.As(err, &rateLimited) || errors.As(err, &abuseLimited) {
-		return err
+	switch {
+	case errors.As(err, &rateLimited):
+		return rateLimitError(err, time.Until(rateLimited.Rate.Reset.Time))
+	case errors.As(err, &abuseLimited):
+		return rateLimitError(err, abuseLimited.GetRetryAfter())
 	}
 	if response == nil || response.Response == nil {
 		return err
 	}
 	return retry.StatusError(err.Error(), response.StatusCode)
+}
+
+// rateLimitError makes a rate limit retryable after its own wait, or a
+// permanent failure when the wait is longer than the job should stall.
+func rateLimitError(err error, wait time.Duration) error {
+	if wait > maxRateLimitWait {
+		return &retry.NonRetryableError{Message: fmt.Sprintf(
+			"%s (rate limit resets in %s, not waiting)", err, wait.Round(time.Second))}
+	}
+	return &retry.DelayedError{Message: err.Error(), Delay: wait}
 }
 
 // AuthenticatedLogin returns the login of the user the token authenticates as.

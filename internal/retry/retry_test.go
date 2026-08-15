@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // testOptions retries without sleeping.
@@ -84,6 +85,30 @@ func TestDoesNotRetryAWrappedNonRetryableError(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("called %d times, want 1: errors.As must see through the wrapping", calls)
+	}
+}
+
+func TestWaitsOutADelayedErrorsOwnDelay(t *testing.T) {
+	calls := 0
+	start := time.Now()
+
+	result, err := Do(context.Background(), func(context.Context) (string, error) {
+		calls++
+		if calls == 1 {
+			return "", &DelayedError{Message: "rate limited", Delay: 50 * time.Millisecond}
+		}
+		return "ok", nil
+	}, testOptions(nil))
+
+	if err != nil || result != "ok" {
+		t.Fatalf("Do = %q, %v, want ok, nil", result, err)
+	}
+	if calls != 2 {
+		t.Errorf("called %d times, want 2", calls)
+	}
+	// testOptions has no backoff of its own, so any wait came from the error.
+	if elapsed := time.Since(start); elapsed < 50*time.Millisecond {
+		t.Errorf("retried after %v, want at least the error's own 50ms delay", elapsed)
 	}
 }
 
