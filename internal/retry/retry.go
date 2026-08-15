@@ -109,15 +109,17 @@ func Do[T any](ctx context.Context, fn func(context.Context) (T, error), opts Op
 			return zero, err
 		}
 
-		if opts.Warn != nil {
-			opts.Warn(fmt.Sprintf("%s failed (%s); retry %d/%d",
-				opts.What, err, attempt, attempts-1))
-		}
-
 		delay := time.Duration(attempt) * opts.BaseDelay
 		var delayed *DelayedError
 		if errors.As(err, &delayed) && delayed.Delay > delay {
 			delay = delayed.Delay
+		}
+
+		// The wait is part of the message: a rate limit can hold the run for
+		// minutes, and without it the log shows a warning and then silence.
+		if opts.Warn != nil {
+			opts.Warn(fmt.Sprintf("%s failed (%s); retry %d/%d in %s",
+				opts.What, err, attempt, attempts-1, delay))
 		}
 
 		timer := time.NewTimer(delay)
