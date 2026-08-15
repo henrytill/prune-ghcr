@@ -56,7 +56,7 @@ func newTestClient(t *testing.T, server *httptest.Server, owner, packageName str
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	client.baseDelay = 0
+	client.backoff.BaseDelay = 0
 	return client
 }
 

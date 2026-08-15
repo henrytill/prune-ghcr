@@ -27,7 +27,7 @@ func newTestClient(t *testing.T, server *httptest.Server) *Client {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	client.baseDelay = 0
+	client.backoff.BaseDelay = 0
 	return client
 }
 
@@ -348,7 +348,7 @@ func TestRetriesATransientFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	client.baseDelay = 0
+	client.backoff.BaseDelay = 0
 
 	login, err := client.AuthenticatedLogin(context.Background())
 	if err != nil {
