@@ -6,11 +6,8 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
-
-	"github.com/henrytill/prune-ghcr/internal/retry"
 )
 
 const (
@@ -51,6 +48,18 @@ func host(server *httptest.Server) string {
 	return strings.TrimPrefix(server.URL, "http://")
 }
 
+// newTestClient points a client at a test server, with the retry backoff
+// turned off so a retry does not sleep.
+func newTestClient(t *testing.T, server *httptest.Server, owner, packageName string) *Client {
+	t.Helper()
+	client, err := NewClient(host(server), owner, packageName, "ghp_tok", nil)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	client.baseDelay = 0
+	return client
+}
+
 func TestLowercasesTheRepositoryPath(t *testing.T) {
 	body := `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `"}`
 	var path string
@@ -60,10 +69,7 @@ func TestLowercasesTheRepositoryPath(t *testing.T) {
 		_, _ = w.Write([]byte(body))
 	})
 
-	client, err := NewClient(host(server), "HenryTill", "Devcontainer-Debian", "ghp_tok", nil)
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
+	client := newTestClient(t, server, "HenryTill", "Devcontainer-Debian")
 	if _, err := client.ReadManifest(context.Background(), digestOf(body)); err != nil {
 		t.Fatalf("ReadManifest: %v", err)
 	}
@@ -87,10 +93,7 @@ func TestReturnsTheChildrenOfAnIndex(t *testing.T) {
 		_, _ = w.Write([]byte(index))
 	})
 
-	client, err := NewClient(host(server), "henrytill", "p", "ghp_tok", nil)
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
+	client := newTestClient(t, server, "henrytill", "p")
 	manifest, err := client.ReadManifest(context.Background(), digestOf(index))
 	if err != nil {
 		t.Fatalf("ReadManifest: %v", err)
@@ -114,10 +117,7 @@ func TestASinglePlatformManifestHasNoChildren(t *testing.T) {
 		_, _ = w.Write([]byte(body))
 	})
 
-	client, err := NewClient(host(server), "henrytill", "p", "ghp_tok", nil)
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
+	client := newTestClient(t, server, "henrytill", "p")
 	manifest, err := client.ReadManifest(context.Background(), digestOf(body))
 	if err != nil {
 		t.Fatalf("ReadManifest: %v", err)
@@ -136,12 +136,9 @@ func TestFailsOnAnErrorStatusWithoutRetrying(t *testing.T) {
 		_, _ = w.Write([]byte(`{"errors":[{"code":"MANIFEST_UNKNOWN"}]}`))
 	})
 
-	client, err := NewClient(host(server), "henrytill", "p", "ghp_tok", nil)
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
+	client := newTestClient(t, server, "henrytill", "p")
 
-	_, err = client.ReadManifest(context.Background(), "sha256:"+strings.Repeat("a", 64))
+	_, err := client.ReadManifest(context.Background(), "sha256:"+strings.Repeat("a", 64))
 
 	if err == nil {
 		t.Fatal("error = nil, want a failure")
@@ -155,10 +152,4 @@ func TestRejectsAnUnparseableRepository(t *testing.T) {
 	if _, err := NewClient("ghcr.io", "hen ry", "p", "tok", nil); err == nil {
 		t.Error("NewClient = nil error, want a failure on an invalid repository")
 	}
-}
-
-// TestMain turns the retry backoff off so a retry does not sleep.
-func TestMain(m *testing.M) {
-	retry.DefaultBaseDelay = 0
-	os.Exit(m.Run())
 }
