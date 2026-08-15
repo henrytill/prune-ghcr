@@ -27,11 +27,6 @@ linters:
     gocyclo:
       # super-linter's bundled configuration uses 15, and Prune was over it.
       min-complexity: 15
-  exclusions:
-    paths:
-      # Vendored Go that ships inside an npm package, and not ours to fix. CI
-      # never sees it, but a local run after `npm ci` would.
-      - node_modules
 
 run:
   # The default is a minute, which a cold build of the dependency graph can

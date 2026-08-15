@@ -17,13 +17,6 @@ on:
   push:
     tags:
       - v[0-9]+.[0-9]+.[0-9]+
-    # TEMPORARY, remove before merge. workflow_dispatch only registers a
-    # workflow once its file is on the default branch, so this one cannot be
-    # dispatched while it exists solely on the port branch -- and the port
-    # cannot merge until an image exists to reference. This trigger breaks that
-    # cycle by publishing the bootstrap image from the branch itself.
-    branches:
-      - go-port
 
 permissions:
   contents: read
