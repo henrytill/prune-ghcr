@@ -54,7 +54,7 @@ fails the run rather than silently skipping the prune.
 | `token`         | _required_                            | PAT with permission to delete package versions.   |
 | `owner`         | `${{ github.repository_owner }}`      | Owner of the package.                             |
 | `package`       | `${{ github.event.repository.name }}` | Container package name.                           |
-| `min-age-hours` | `0`                                   | Skip versions younger than this.                  |
+| `min-age-hours` | `0`                                   | Skip versions younger than this; at most 2562047. |
 | `dry-run`       | `false`                               | Report what would be deleted without deleting it. |
 
 ### Outputs
