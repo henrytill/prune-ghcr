@@ -1,0 +1,10 @@
+# See: https://github.com/vladopajic/go-test-coverage
+
+profile: coverage.out
+
+threshold:
+  # Only a total is enforced. Per-file and per-package minimums would fail on
+  # cmd/prune-ghcr, which sits at 13% because run() constructs real clients
+  # against hardcoded hosts and is not reachable from a test without a
+  # refactor. A floor that has to be waived is not a floor.
+  total: 75
