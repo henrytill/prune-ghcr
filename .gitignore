@@ -1,6 +1,8 @@
 # Go build output
 /prune-ghcr
 *.test
+
+# Coverage
 *.out
 
 # dotenv environment variables file
