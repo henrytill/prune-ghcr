@@ -28,6 +28,7 @@ type ManifestReader interface {
 // Logger receives the action's log output.
 type Logger interface {
 	Info(string)
+	Warning(string)
 	Error(string)
 }
 
@@ -130,7 +131,7 @@ func doomedVersions(
 			// compared NaN here, which is false, so a version whose updated_at
 			// could not be read was deleted; skip it instead, on the same
 			// refusal to guess as the unreadable manifest above.
-			log.Error(fmt.Sprintf("skipping %s (no usable updated_at)", version.Name))
+			log.Warning(fmt.Sprintf("skipping %s (no usable updated_at)", version.Name))
 			continue
 		}
 		if version.UpdatedAt.After(cutoff) {

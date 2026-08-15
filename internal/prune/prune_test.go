@@ -62,15 +62,17 @@ func (f *fakeRegistry) ReadManifest(_ context.Context, reference string) (regist
 }
 
 type recorder struct {
-	infos  []string
-	errors []string
+	infos    []string
+	warnings []string
+	errors   []string
 }
 
-func (r *recorder) Info(message string)  { r.infos = append(r.infos, message) }
-func (r *recorder) Error(message string) { r.errors = append(r.errors, message) }
+func (r *recorder) Info(message string)    { r.infos = append(r.infos, message) }
+func (r *recorder) Warning(message string) { r.warnings = append(r.warnings, message) }
+func (r *recorder) Error(message string)   { r.errors = append(r.errors, message) }
 
-func (r *recorder) errorContaining(substring string) bool {
-	for _, message := range r.errors {
+func contains(messages []string, substring string) bool {
+	for _, message := range messages {
 		if strings.Contains(message, substring) {
 			return true
 		}
@@ -207,8 +209,10 @@ func TestSkipsVersionsWithNoUsableTimestamp(t *testing.T) {
 	if got := versions.deletedIDs; len(got) != 1 || got[0] != 2 {
 		t.Errorf("deleted ids = %v, want [2]", got)
 	}
-	if !log.errorContaining("sha256:broken") {
-		t.Errorf("errors = %v, want one mentioning sha256:broken", log.errors)
+	// A skip the run survives is a warning; an error annotation would paint
+	// a successful run red.
+	if !contains(log.warnings, "sha256:broken") {
+		t.Errorf("warnings = %v, want one mentioning sha256:broken", log.warnings)
 	}
 	want := Result{Total: 2, Kept: 1, Deleted: 1}
 	if result != want {
@@ -267,7 +271,7 @@ func TestCountsDeleteFailuresAndContinues(t *testing.T) {
 	if len(versions.deletedIDs) != 2 {
 		t.Errorf("attempted %v, want both", versions.deletedIDs)
 	}
-	if !log.errorContaining("failed to delete sha256:a") {
+	if !contains(log.errors, "failed to delete sha256:a") {
 		t.Errorf("errors = %v, want one mentioning failed to delete sha256:a", log.errors)
 	}
 	want := Result{Total: 2, Kept: 0, Deleted: 1, Failed: 1}

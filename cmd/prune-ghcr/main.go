@@ -22,8 +22,9 @@ import (
 // logger adapts the actions package to prune.Logger.
 type logger struct{}
 
-func (logger) Info(message string)  { actions.Info(message) }
-func (logger) Error(message string) { actions.Error(message) }
+func (logger) Info(message string)    { actions.Info(message) }
+func (logger) Warning(message string) { actions.Warning(message) }
+func (logger) Error(message string)   { actions.Error(message) }
 
 func main() {
 	if err := run(context.Background()); err != nil {
