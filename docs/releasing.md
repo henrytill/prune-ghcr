@@ -88,7 +88,7 @@ digest would report a mismatch that is only a difference of spelling.
 
 buildx documents `oci-mediatypes` as defaulting to `true` for `type=oci` and
 `false` for the `type=image` exporter that pushes, which would produce exactly
-that. In practice the pushed images have been OCI indexes regardless — `v2.0.0`,
+that. In practice the pushed images have been OCI indices regardless — `v2.0.0`,
 published before any of this, is one. Naming it on both exporters means the
 parity rests on neither the documented default nor the observed one.
 
