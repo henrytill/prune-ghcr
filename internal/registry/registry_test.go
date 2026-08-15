@@ -175,6 +175,71 @@ func TestRetriesATransientStatusOnlyThroughTheSharedBackoff(t *testing.T) {
 	}
 }
 
+// TestReusesTheAuthHandshakeAcrossReads guards the shared puller: the ping
+// and token exchange happen once per client, not once per manifest.
+func TestReusesTheAuthHandshakeAcrossReads(t *testing.T) {
+	body := `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `"}`
+	pings := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v2/" || r.URL.Path == "/v2":
+			pings++
+			w.WriteHeader(http.StatusOK)
+		case strings.HasPrefix(r.URL.Path, "/token"):
+			_, _ = w.Write([]byte(`{"token":"registry-token"}`))
+		default:
+			w.Header().Set("Content-Type", manifestMediaType)
+			_, _ = w.Write([]byte(body))
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server, "henrytill", "p")
+	for range 2 {
+		if _, err := client.ReadManifest(context.Background(), digestOf(body)); err != nil {
+			t.Fatalf("ReadManifest: %v", err)
+		}
+	}
+
+	if pings != 1 {
+		t.Errorf("made %d handshakes for 2 reads, want 1", pings)
+	}
+}
+
+// TestRetriesAFailedAuthHandshake guards resetPuller: the puller caches a
+// failed handshake, so without the reset every retry would replay the failure
+// from the cache and never reach the network again.
+func TestRetriesAFailedAuthHandshake(t *testing.T) {
+	body := `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `"}`
+	pings := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v2/" || r.URL.Path == "/v2":
+			pings++
+			if pings == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		case strings.HasPrefix(r.URL.Path, "/token"):
+			_, _ = w.Write([]byte(`{"token":"registry-token"}`))
+		default:
+			w.Header().Set("Content-Type", manifestMediaType)
+			_, _ = w.Write([]byte(body))
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server, "henrytill", "p")
+	if _, err := client.ReadManifest(context.Background(), digestOf(body)); err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+
+	if pings != 2 {
+		t.Errorf("made %d handshakes, want 2: the cached failure must not be replayed", pings)
+	}
+}
+
 func TestRejectsAnUnparseableRepository(t *testing.T) {
 	if _, err := NewClient("ghcr.io", "hen ry", "p", "tok", nil); err == nil {
 		t.Error("NewClient = nil error, want a failure on an invalid repository")

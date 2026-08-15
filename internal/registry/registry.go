@@ -30,10 +30,12 @@ type Descriptor struct {
 	Digest string
 }
 
-// Client reads manifests from one repository.
+// Client reads manifests from one repository. It is not safe for concurrent
+// use: a failed read replaces the cached authentication.
 type Client struct {
 	repository name.Repository
 	options    []remote.Option
+	puller     *remote.Puller
 	backoff    retry.Backoff
 }
 
@@ -66,19 +68,41 @@ func NewClient(
 		return nil, fmt.Errorf("parsing repository %q: %w", path, err)
 	}
 
+	remoteOptions := []remote.Option{
+		remote.WithAuth(&authn.Basic{Username: owner, Password: githubToken}),
+		// One attempt: go-containerregistry otherwise retries transient
+		// failures itself, three times with its own backoff, invisibly --
+		// its retry log is discarded by default. Stacked under retry.Do
+		// that means up to nine requests per read, so retrying is left to
+		// internal/retry alone, which also warns per retry.
+		remote.WithRetryBackoff(remote.Backoff{Steps: 1}),
+	}
+
+	// One puller for the client's lifetime, so the ping and token exchange
+	// happen once per run rather than once per manifest.
+	puller, err := remote.NewPuller(remoteOptions...)
+	if err != nil {
+		return nil, fmt.Errorf("configuring the registry client: %w", err)
+	}
+
 	return &Client{
 		repository: repository,
-		options: []remote.Option{
-			remote.WithAuth(&authn.Basic{Username: owner, Password: githubToken}),
-			// One attempt: go-containerregistry otherwise retries transient
-			// failures itself, three times with its own backoff, invisibly --
-			// its retry log is discarded by default. Stacked under retry.Do
-			// that means up to nine requests per read, so retrying is left to
-			// internal/retry alone, which also warns per retry.
-			remote.WithRetryBackoff(remote.Backoff{Steps: 1}),
-		},
-		backoff: retry.NewBackoff(warn),
+		options:    remoteOptions,
+		puller:     puller,
+		backoff:    retry.NewBackoff(warn),
 	}, nil
+}
+
+// resetPuller discards the cached authentication after a failed read. The
+// puller remembers its first handshake, a failed one included, so a retry
+// against the old puller would replay the failure from the cache instead of
+// reaching the network. NewPuller only fails on invalid options, which
+// NewClient already validated; if it fails anyway the old puller stays, which
+// at worst replays the error the caller is already seeing.
+func (c *Client) resetPuller() {
+	if puller, err := remote.NewPuller(c.options...); err == nil {
+		c.puller = puller
+	}
 }
 
 // isLoopback reports whether host is an httptest server rather than a real
@@ -95,7 +119,7 @@ const labelWidth = len("sha256:") + 12
 
 // ReadManifest fetches a manifest by digest.
 //
-// remote.Get negotiates the media types itself, so the explicit Accept list the
+// The puller negotiates the media types itself, so the explicit Accept list the
 // hand-rolled client carried is no longer spelled out here; a single-platform
 // manifest simply comes back with no children.
 func (c *Client) ReadManifest(ctx context.Context, reference string) (Manifest, error) {
@@ -107,9 +131,9 @@ func (c *Client) ReadManifest(ctx context.Context, reference string) (Manifest, 
 	return retry.Do(ctx, func(ctx context.Context) (Manifest, error) {
 		var manifest Manifest
 
-		descriptor, err := remote.Get(c.repository.Digest(reference),
-			append(c.options, remote.WithContext(ctx))...)
+		descriptor, err := c.puller.Get(ctx, c.repository.Digest(reference))
 		if err != nil {
+			c.resetPuller()
 			return manifest, classify(err)
 		}
 
