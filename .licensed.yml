@@ -1,7 +1,6 @@
 # See: https://github.com/licensee/licensed/blob/main/docs/configuration.md
 
 sources:
-  npm: true
   go: true
 
 allowed:
@@ -12,8 +11,3 @@ allowed:
   - mit
   - cc0-1.0
   - other
-
-ignored:
-  npm:
-    # Used by Rollup.js when building in GitHub Actions
-    - '@rollup/rollup-linux-x64-gnu'

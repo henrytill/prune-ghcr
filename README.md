@@ -1,8 +1,7 @@
 # Prune untagged GHCR versions
 
 [![CI](https://github.com/henrytill/prune-ghcr/actions/workflows/ci.yml/badge.svg)](https://github.com/henrytill/prune-ghcr/actions/workflows/ci.yml)
-[![Check dist/](https://github.com/henrytill/prune-ghcr/actions/workflows/check-dist.yml/badge.svg)](https://github.com/henrytill/prune-ghcr/actions/workflows/check-dist.yml)
-[![Coverage](./badges/coverage.svg)](./badges/coverage.svg)
+[![Vulnerability Check](https://github.com/henrytill/prune-ghcr/actions/workflows/govulncheck.yml/badge.svg)](https://github.com/henrytill/prune-ghcr/actions/workflows/govulncheck.yml)
 
 Deletes untagged container versions of a GHCR package, keeping any that a tagged
 multi-arch index still references.
@@ -88,23 +87,37 @@ permanent ones (403, 404) fail straight away.
 ## Development
 
 ```bash
-npm ci
-npm run test        # unit tests
-npm run all         # format, lint, test, coverage, package
-npm run bundle      # rebuild dist/ after changing src/
+go build ./...
+go test ./...
+gofmt -l cmd internal
 ```
 
-`dist/` is committed and checked by the `check-dist` workflow, so rebuild and
-commit it whenever `src/` changes.
-
-To run the action locally, copy `.env.example` to `.env`, fill in a token, and:
+Static analysis is golangci-lint, configured by `.golangci.yml`, which is what
+CI runs:
 
 ```bash
-npm run local-action
+go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run ./...
 ```
 
-That rebuilds the bundle and runs it under `node --env-file`, so a local run
-exercises exactly what a workflow would.
+To run the action locally, copy `.env.example` to `.env` and fill in a token.
+Inputs reach the binary as `INPUT_<NAME>` environment variables with hyphens
+preserved, so `env` has to set them: `INPUT_MIN-AGE-HOURS` is not a name the
+shell can assign, and sourcing the file silently drops it.
+
+```bash
+env $(grep -vE '^\s*#|^\s*$' .env | xargs) \
+  GITHUB_OUTPUT=/dev/null go run ./cmd/prune-ghcr
+```
+
+`GITHUB_OUTPUT` has to point somewhere writable: outside a runner there is no
+file for the action to append its outputs to.
+
+### Releasing
+
+The action runs from a prebuilt image, referenced by digest, so an image must be
+published from a commit before that commit is tagged. `script/release` asks
+about this because getting the order wrong ships older code under a newer
+version.
 
 ## License
 
