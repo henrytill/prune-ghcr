@@ -51,4 +51,4 @@ runs:
   # and it has to be updated before the release is tagged. script/release asks
   # whether that happened; it cannot check, and nothing else will catch it.
   using: docker
-  image: docker://ghcr.io/henrytill/prune-ghcr@sha256:23d58adfe5a4be883e9d6fedbdb47df6038b8db2badfd0e80ebe6e4499d957e1
+  image: docker://ghcr.io/henrytill/prune-ghcr@sha256:7ae97483998f018c38cc2630e0a224d81cf46313c2ecff14c00f99425dc0b3b5
