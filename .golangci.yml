@@ -29,6 +29,13 @@ linters:
       # super-linter's bundled configuration uses 15, and Prune was over it.
       min-complexity: 15
 
+# Formatting is checked by `golangci-lint run` and applied by `golangci-lint
+# fmt`, which replaces the gofmt step ci.yml used to carry. In v2 formatters are
+# their own section: gofmt is not selectable under `linters`.
+formatters:
+  enable:
+    - gofmt
+
 run:
   # The default is a minute, which a cold build of the dependency graph can
   # exceed on a loaded runner.

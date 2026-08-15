@@ -29,17 +29,9 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Check Format
-        id: gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "::error::gofmt needed for: $unformatted"
-            exit 1
-          fi
-
-      # The single owner of Go static analysis: vet, staticcheck and errcheck
-      # all arrive through golangci-lint's standard set, so none of them runs
+      # The single owner of Go static analysis and formatting: vet, staticcheck
+      # and errcheck all arrive through golangci-lint's standard set, and gofmt
+      # through the formatters section of .golangci.yml, so none of them runs
       # separately. See linter.yml for why super-linter does not do this.
       #
       # The action installs a prebuilt binary. `go run ...@v2.12.2` compiled it
