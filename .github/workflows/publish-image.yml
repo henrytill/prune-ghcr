@@ -64,13 +64,20 @@ jobs:
       # fixes the image config's created time; the layers COPY produces still
       # carry the build time, and rewriting those is what makes the digest
       # stable. See docs/releasing.md.
+      #
+      # `oci-mediatypes=true` because this exporter defaults it to false while
+      # `type=oci` defaults it to true. Media types are part of the manifest
+      # bytes, so without this the same image exports under two different
+      # digests depending on where it is written, and any check that rebuilds
+      # locally and compares against the published digest reports a false
+      # mismatch. ci.yml uses `type=oci`, so this is what makes the two agree.
       - name: Build and Push
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          outputs: type=image,push=true,rewrite-timestamp=true
+          outputs: type=image,push=true,rewrite-timestamp=true,oci-mediatypes=true
           tags: ghcr.io/${{ github.repository }}:${{ inputs.tag }}
           # The revision is what makes the pin auditable: given a digest, the
           # commit it was built from can be read back out of the image. It is

@@ -74,10 +74,20 @@ What gets it there:
   rebuilding that commit also has
 - buildx's `rewrite-timestamp`, which is why `publish-image.yml` passes
   `outputs: type=image,push=true,...` rather than `push: true`
+- `oci-mediatypes=true` on every export, so that a digest does not depend on
+  which exporter produced it
 
-The last two go together. `SOURCE_DATE_EPOCH` alone fixes the created time in
+The middle two go together. `SOURCE_DATE_EPOCH` alone fixes the created time in
 the image config, but the layers `COPY` produces still carry the build time, and
 those are what the digest is over.
+
+The last one is a trap rather than a choice. Media types are part of the
+manifest bytes, and buildx defaults `oci-mediatypes` to `true` for `type=oci`
+but `false` for the `type=image` exporter that pushes. Left at the defaults, the
+same image comes out under two digests depending on where it is written, and a
+rebuild compared against the published digest reports a mismatch that is really
+just a difference of spelling. Both exporters name it explicitly so a change of
+default cannot reintroduce that.
 
 ### Reproducing a published image
 
@@ -96,7 +106,7 @@ SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct "$rev") \
     --platform linux/amd64,linux/arm64 \
     --label "org.opencontainers.image.revision=${rev}" \
     --provenance=false \
-    --output type=oci,dest=./image,tar=false,rewrite-timestamp=true
+    --output type=oci,dest=./image,tar=false,rewrite-timestamp=true,oci-mediatypes=true
 
 jq -r '.manifests[0].digest' image/index.json   # compare with action.yml
 ```

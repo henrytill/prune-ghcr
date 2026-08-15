@@ -97,13 +97,17 @@ jobs:
       # push to, and the digest an image exporter computes does not depend on
       # where the bytes land. Every flag that affects the digest has to match
       # what publish-image.yml passes, or this job proves the wrong thing.
+      #
+      # `oci-mediatypes=true` is already the default for `type=oci`, and is
+      # written out anyway: it is not the default for the exporter publishing
+      # uses, and the two agreeing is the point.
       - name: Build
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          outputs: type=oci,dest=/tmp/image-a,tar=false,rewrite-timestamp=true
+          outputs: type=oci,dest=/tmp/image-a,tar=false,rewrite-timestamp=true,oci-mediatypes=true
           labels: org.opencontainers.image.revision=${{ github.sha }}
           provenance: false
 
@@ -115,7 +119,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          outputs: type=oci,dest=/tmp/image-b,tar=false,rewrite-timestamp=true
+          outputs: type=oci,dest=/tmp/image-b,tar=false,rewrite-timestamp=true,oci-mediatypes=true
           labels: org.opencontainers.image.revision=${{ github.sha }}
           provenance: false
           no-cache: true
