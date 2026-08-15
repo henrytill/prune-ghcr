@@ -18,7 +18,7 @@ set -e
 # 2. Display the latest release tag
 # 3. Prompt the user for a new release tag
 # 4. Validate the new release tag
-# 5. Remind user that action.yml must reference this commit's image
+# 5. Verify action.yml references the image published under this tag
 # 6. Tag a new release
 # 7. Set 'is_major_release' variable
 # 8. Point separate major release tag (e.g. v1, v2) to the new release
@@ -41,7 +41,6 @@ BOLD_RED='\033[1;31m'
 BOLD_GREEN='\033[1;32m'
 BOLD_BLUE='\033[1;34m'
 BOLD_PURPLE='\033[1;35m'
-BOLD_UNDERLINED='\033[1;4m'
 BOLD='\033[1m'
 
 # 1. Retrieve the latest release tag
@@ -67,19 +66,58 @@ else
 	exit 1
 fi
 
-# 5. Remind user that action.yml must reference the image built from this commit
-echo -e "The image ${BOLD}must${OFF} be published from this commit before tagging it,"
-echo -e "and ${BOLD_BLUE}action.yml${OFF} must reference that image by digest. A tag whose"
-echo -e "action.yml points at an older digest ships older code under a new version."
-echo -e ""
-echo -e -n "Has the image been published and ${BOLD_BLUE}action.yml${OFF} repointed? [Y/${BOLD_UNDERLINED}n${OFF}] "
-read -r YN
+# 5. Verify action.yml references the image published under this tag
+#
+# This is a check rather than a prompt because nothing else can catch it:
+# GitHub cannot gate a tag on a status check, and a tag whose action.yml names
+# an older digest ships older code under a new version.
+echo -e "Checking that ${BOLD_BLUE}action.yml${OFF} references the ${BOLD_BLUE}$new_tag${OFF} image..."
 
-if [[ ! ($YN == "y" || $YN == "Y") ]]; then
-	# action.yml still references a stale image
-	echo -e "Run the ${BOLD_PURPLE}Publish Image${OFF} workflow, then commit the digest it prints"
+pinned_digest=$(grep -oE 'sha256:[0-9a-f]{64}' action.yml | head -1)
+if [[ -z $pinned_digest ]]; then
+	echo -e "${BOLD_RED}action.yml does not reference an image by digest${OFF}"
 	exit 1
 fi
+
+package="${GITHUB_REPOSITORY##*/}"
+package="${package:-prune-ghcr}"
+
+# The packages API names each version by its digest and lists the tags it
+# carries, so one query answers both halves of the question. The two failures
+# are distinct and worth reporting separately: a digest that was never published
+# is a different mistake from one whose tag has since moved on.
+if ! published=$(gh api --paginate \
+	"user/packages/container/${package}/versions" \
+	--jq ".[] | select(.name == \"$pinned_digest\") | .name" 2>/dev/null); then
+	echo -e "${BOLD_RED}Could not query the packages API${OFF} (is gh authenticated?)"
+	exit 1
+fi
+
+if [[ -z $published ]]; then
+	echo -e "${BOLD_RED}No published image has digest${OFF} $pinned_digest"
+	echo -e "Run the ${BOLD_PURPLE}Publish Image${OFF} workflow and merge the pull request it opens"
+	exit 1
+fi
+
+version_tags=$(gh api --paginate \
+	"user/packages/container/${package}/versions" \
+	--jq ".[] | select(.name == \"$pinned_digest\") | .metadata.container.tags[]" 2>/dev/null)
+
+if [[ -z $version_tags ]]; then
+	echo -e "${BOLD_RED}The image action.yml references carries no tags${OFF}"
+	echo -e "It is still pullable by digest, but an untagged version is what this"
+	echo -e "very action deletes, so a release must not depend on one."
+	exit 1
+fi
+
+if ! grep -qx "$new_tag" <<<"$version_tags"; then
+	echo -e "${BOLD_RED}The image action.yml references is not tagged${OFF} $new_tag"
+	echo -e "It carries: $(tr '\n' ' ' <<<"$version_tags")"
+	echo -e "Publish $new_tag first, then merge the pull request that repoints action.yml"
+	exit 1
+fi
+
+echo -e "${BOLD_GREEN}OK${OFF} - $pinned_digest is published as $new_tag"
 
 # 6. Tag a new release
 git tag "$new_tag" --annotate --message "$new_tag Release"

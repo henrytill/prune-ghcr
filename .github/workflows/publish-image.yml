@@ -1,22 +1,23 @@
 name: Publish Image
 
-# Builds and pushes the image the action runs. The digest it prints is what
-# action.yml must reference: a floating tag would mean a consumer pinning this
-# action by commit SHA still got whatever was pushed to that tag last.
+# Builds and pushes the image the action runs, then opens a pull request
+# repointing action.yml at the digest.
+#
+# Dispatch only, and deliberately so. A trigger on the release tag would build
+# an image nobody uses: action.yml at that tag was written earlier and names an
+# older digest, so the image published under the tag would not be the image the
+# action runs. The digest has to exist before the commit that references it,
+# which means publishing comes first and tagging comes last.
 on:
   # checkov:skip=CKV_GHA_7: the input names the tag the image is published
   # under, not anything the build reads. The build entry point is the committed
   # Dockerfile and the source is this checkout, both of which the input cannot
-  # reach. The dispatch exists so the first image can be published before any
-  # release tag exists.
+  # reach.
   workflow_dispatch:
     inputs:
       tag:
         description: Tag to publish, e.g. v1.1.0 or a prerelease.
         required: true
-  push:
-    tags:
-      - v[0-9]+.[0-9]+.[0-9]+
 
 permissions:
   contents: read
@@ -26,22 +27,16 @@ jobs:
     name: Publish Image
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
+      pull-requests: write
 
     steps:
       - name: Checkout
         id: checkout
+        # Credentials are kept: this workflow pushes the digest branch.
+        # zizmor: ignore[artipacked]
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Resolve Tag
-        id: tag
-        env:
-          INPUT_TAG: ${{ inputs.tag }}
-          REF_NAME: ${{ github.ref_name }}
-        run: echo "tag=${INPUT_TAG:-$REF_NAME}" >>"$GITHUB_OUTPUT"
 
       - name: Set Up Buildx
         id: buildx
@@ -64,13 +59,47 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.tag }}
+          tags: ghcr.io/${{ github.repository }}:${{ inputs.tag }}
+          # The revision is what makes the pin auditable: given a digest, the
+          # commit it was built from can be read back out of the image.
+          labels: org.opencontainers.image.revision=${{ github.sha }}
           provenance: false
 
-      - name: Print the digest to pin
-        id: digest
+      # action.yml is not a build input, so a commit that changes only this line
+      # produces the same image. That is what makes publishing before the commit
+      # that references the digest sound rather than circular.
+      - name: Open a pull request with the new digest
+        id: open-pr
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DIGEST: ${{ steps.build.outputs.digest }}
+          TAG: ${{ inputs.tag }}
         run: |
-          echo "Reference this from action.yml:"
-          echo "  image: docker://ghcr.io/${GITHUB_REPOSITORY}@${DIGEST}"
+          image="docker://ghcr.io/${GITHUB_REPOSITORY}@${DIGEST}"
+          sed -i -E "s|^(  image: ).*|\1${image}|" action.yml
+
+          if git diff --quiet -- action.yml; then
+            echo "action.yml already references ${DIGEST}; nothing to open."
+            exit 0
+          fi
+
+          branch="publish/${TAG}-${GITHUB_RUN_ID}"
+          git config --local user.email "publish-ci@users.noreply.github.com"
+          git config --local user.name "publish-ci"
+          git switch -c "$branch"
+          git add action.yml
+          git commit -m "Point the action at the ${TAG} image"
+          git push --set-upstream origin "$branch"
+
+          gh pr create \
+            --base "${GITHUB_REF_NAME}" \
+            --title "Point the action at the ${TAG} image" \
+            --body "Published \`${TAG}\` as \`${DIGEST}\`, built from \
+          \`${GITHUB_SHA}\`.
+
+          Merge this, then tag the merge commit. \`script/release\` checks that
+          the digest here is the one published under the tag being released.
+
+          Note: this pull request was created with \`GITHUB_TOKEN\`, and events
+          from that token do not start workflow runs, so its checks will be
+          empty. Close and reopen it to run them."
