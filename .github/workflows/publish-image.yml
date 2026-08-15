@@ -86,11 +86,14 @@ jobs:
           fi
 
           branch="publish/${TAG}-${GITHUB_RUN_ID}"
-          git config --local user.email "publish-ci@users.noreply.github.com"
-          git config --local user.name "publish-ci"
           git switch -c "$branch"
           git add action.yml
-          git commit -m "Point the action at the ${TAG} image"
+          # The ID-prefixed noreply address pins attribution to the Actions
+          # bot's account. A bare made-up <name>@users.noreply.github.com would
+          # attribute these commits to whoever registers <name> as a username.
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "Point the action at the ${TAG} image"
           git push --set-upstream origin "$branch"
 
           echo "Open a pull request to repoint action.yml:"
