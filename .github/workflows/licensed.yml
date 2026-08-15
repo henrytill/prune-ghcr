@@ -73,11 +73,14 @@ jobs:
           fi
 
           branch="licensed/update-${GITHUB_RUN_ID}"
-          git config --local user.email "licensed-ci@users.noreply.github.com"
-          git config --local user.name "licensed-ci"
           git switch -c "$branch"
           git add .licenses
-          git commit -m "Auto-update license files"
+          # The ID-prefixed noreply address pins attribution to the Actions
+          # bot's account; see publish-image.yml for why a made-up name is
+          # worse than it looks.
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "Auto-update license files"
           git push --set-upstream origin "$branch"
 
           echo "Open a pull request for the refreshed cache:"
