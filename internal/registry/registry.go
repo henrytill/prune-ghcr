@@ -93,10 +93,8 @@ func NewClient(
 	}, nil
 }
 
-// resetPuller discards the cached authentication after a failed read. The
-// puller remembers its first handshake, a failed one included, so a retry
-// against the old puller would replay the failure from the cache instead of
-// reaching the network. NewPuller only fails on invalid options, which
+// resetPuller replaces the puller, discarding its cached handshake, so the
+// next attempt starts clean. NewPuller only fails on invalid options, which
 // NewClient already validated; if it fails anyway the old puller stays, which
 // at worst replays the error the caller is already seeing.
 func (c *Client) resetPuller() {
@@ -133,8 +131,19 @@ func (c *Client) ReadManifest(ctx context.Context, reference string) (Manifest, 
 
 		descriptor, err := c.puller.Get(ctx, c.repository.Digest(reference))
 		if err != nil {
-			c.resetPuller()
-			return manifest, classify(err)
+			err = classify(err)
+			// A fresh puller is only ever consumed by a retry, so keep the
+			// cached handshake when no retry will happen. When one will, the
+			// reset is deliberate collateral: a failed handshake and a failed
+			// read are not reliably distinguishable across the library's error
+			// types, so a transient read failure re-authenticates too, paying
+			// two extra requests rather than risking a retry that replays a
+			// cached handshake failure without reaching the network.
+			var nonRetryable *retry.NonRetryableError
+			if ctx.Err() == nil && !errors.As(err, &nonRetryable) {
+				c.resetPuller()
+			}
+			return manifest, err
 		}
 
 		if !descriptor.MediaType.IsIndex() {
