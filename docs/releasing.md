@@ -81,13 +81,16 @@ The middle two go together. `SOURCE_DATE_EPOCH` alone fixes the created time in
 the image config, but the layers `COPY` produces still carry the build time, and
 those are what the digest is over.
 
-The last one is a trap rather than a choice. Media types are part of the
-manifest bytes, and buildx defaults `oci-mediatypes` to `true` for `type=oci`
-but `false` for the `type=image` exporter that pushes. Left at the defaults, the
-same image comes out under two digests depending on where it is written, and a
-rebuild compared against the published digest reports a mismatch that is really
-just a difference of spelling. Both exporters name it explicitly so a change of
-default cannot reintroduce that.
+The last one is insurance against a difference that is easy to miss. Media types
+are part of the manifest bytes, so an OCI index and a Docker manifest list over
+identical layers hash differently, and a rebuild compared against the published
+digest would report a mismatch that is only a difference of spelling.
+
+buildx documents `oci-mediatypes` as defaulting to `true` for `type=oci` and
+`false` for the `type=image` exporter that pushes, which would produce exactly
+that. In practice the pushed images have been OCI indexes regardless — `v2.0.0`,
+published before any of this, is one. Naming it on both exporters means the
+parity rests on neither the documented default nor the observed one.
 
 ### Reproducing a published image
 
