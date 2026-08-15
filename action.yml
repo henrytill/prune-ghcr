@@ -45,7 +45,10 @@ outputs:
 runs:
   # By digest, not by tag. A consumer pinning this action by commit SHA expects
   # that to pin the code that runs; against a mutable tag it would pin only this
-  # file. script/release must repoint this after each publish, which is the
-  # trade for that guarantee.
+  # file.
+  #
+  # The digest is updated by hand, from what the Publish Image workflow prints,
+  # and it has to be updated before the release is tagged. script/release asks
+  # whether that happened; it cannot check, and nothing else will catch it.
   using: docker
   image: docker://ghcr.io/henrytill/prune-ghcr@sha256:23d58adfe5a4be883e9d6fedbdb47df6038b8db2badfd0e80ebe6e4499d957e1
