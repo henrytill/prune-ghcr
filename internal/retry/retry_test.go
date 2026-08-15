@@ -153,7 +153,7 @@ func TestRethrowsAfterTheLastAttempt(t *testing.T) {
 
 func TestStopsWhenTheContextIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	options := New("thing", nil)
+	options := NewBackoff(nil).Options("thing")
 	calls := 0
 
 	_, err := Do(ctx, func(context.Context) (string, error) {

@@ -49,8 +49,9 @@ func StatusError(message string, status int) error {
 	return &NonRetryableError{Message: message}
 }
 
-// Options configures a call to Do. Build it with New so the defaults apply; a
-// zero BaseDelay means no delay, which is what the tests want.
+// Options configures a call to Do. Build it with Backoff.Options so the
+// defaults apply; a zero BaseDelay means no delay, which is what the tests
+// want.
 type Options struct {
 	// What describes the operation, and is used in the retry log line.
 	What      string
@@ -62,13 +63,26 @@ type Options struct {
 	Warn func(string)
 }
 
-// New returns Options with the default attempt count and backoff.
-func New(what string, warn func(string)) Options {
+// Backoff is the operation-independent half of Options: the warn sink and
+// backoff unit a client carries between calls. It exists so each client does
+// not grow its own copy of this seam; tests zero BaseDelay through it.
+type Backoff struct {
+	BaseDelay time.Duration
+	Warn      func(string)
+}
+
+// NewBackoff returns a Backoff with the default delay.
+func NewBackoff(warn func(string)) Backoff {
+	return Backoff{BaseDelay: DefaultBaseDelay, Warn: warn}
+}
+
+// Options builds the retry configuration for one operation.
+func (b Backoff) Options(what string) Options {
 	return Options{
 		What:      what,
 		Attempts:  DefaultAttempts,
-		BaseDelay: DefaultBaseDelay,
-		Warn:      warn,
+		BaseDelay: b.BaseDelay,
+		Warn:      b.Warn,
 	}
 }
 

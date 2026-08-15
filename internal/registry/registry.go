@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -35,10 +34,7 @@ type Descriptor struct {
 type Client struct {
 	repository name.Repository
 	options    []remote.Option
-	warn       func(string)
-	// baseDelay is the retry backoff unit. It exists so the tests can zero
-	// it; everything else leaves it at retry.DefaultBaseDelay.
-	baseDelay time.Duration
+	backoff    retry.Backoff
 }
 
 // NewClient returns a client authorized to read a repository's manifests.
@@ -75,17 +71,8 @@ func NewClient(
 		options: []remote.Option{
 			remote.WithAuth(&authn.Basic{Username: owner, Password: githubToken}),
 		},
-		warn:      warn,
-		baseDelay: retry.DefaultBaseDelay,
+		backoff: retry.NewBackoff(warn),
 	}, nil
-}
-
-// retryOptions builds the retry configuration for one operation, carrying the
-// client's backoff unit.
-func (c *Client) retryOptions(what string) retry.Options {
-	options := retry.New(what, c.warn)
-	options.BaseDelay = c.baseDelay
-	return options
 }
 
 // isLoopback reports whether host is an httptest server rather than a real
@@ -138,7 +125,7 @@ func (c *Client) ReadManifest(ctx context.Context, reference string) (Manifest, 
 				Descriptor{Digest: child.Digest.String()})
 		}
 		return manifest, nil
-	}, c.retryOptions("manifest "+label))
+	}, c.backoff.Options("manifest "+label))
 }
 
 // classify marks a registry error retryable or not by its HTTP status, so a 403
