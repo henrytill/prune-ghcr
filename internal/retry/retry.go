@@ -23,6 +23,17 @@ type NonRetryableError struct {
 
 func (e *NonRetryableError) Error() string { return e.Message }
 
+// DelayedError is a retryable error that knows how long the next attempt
+// should wait, such as a rate limit carrying its own reset time. Do waits the
+// larger of Delay and the backoff it would have used anyway, so a Delay of
+// zero or less changes nothing.
+type DelayedError struct {
+	Message string
+	Delay   time.Duration
+}
+
+func (e *DelayedError) Error() string { return e.Message }
+
 // IsRetryableStatus reports whether a request that returned status is worth
 // retrying.
 func IsRetryableStatus(status int) bool {
@@ -89,7 +100,13 @@ func Do[T any](ctx context.Context, fn func(context.Context) (T, error), opts Op
 				opts.What, err, attempt, attempts-1))
 		}
 
-		timer := time.NewTimer(time.Duration(attempt) * opts.BaseDelay)
+		delay := time.Duration(attempt) * opts.BaseDelay
+		var delayed *DelayedError
+		if errors.As(err, &delayed) && delayed.Delay > delay {
+			delay = delayed.Delay
+		}
+
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
