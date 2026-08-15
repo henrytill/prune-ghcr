@@ -3,6 +3,15 @@
 sources:
   go: true
 
+# The Go source enumerates dependencies from a directory containing Go files,
+# and the module root holds none -- everything is under cmd/ and internal/.
+# Without this, licensed reports "0 dependencies checked" and passes, which is
+# worse than failing. cmd/prune-ghcr is the right root anyway: its transitive
+# imports are exactly what ships in the binary.
+apps:
+  - name: prune-ghcr
+    source_path: cmd/prune-ghcr
+
 allowed:
   - apache-2.0
   - bsd-2-clause
