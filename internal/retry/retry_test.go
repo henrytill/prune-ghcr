@@ -51,8 +51,8 @@ func TestRetriesATransientFailureAndWarns(t *testing.T) {
 	if calls != 2 {
 		t.Errorf("called %d times, want 2", calls)
 	}
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "thing failed (ECONNRESET)") {
-		t.Errorf("warnings = %v, want one mentioning thing failed (ECONNRESET)", warnings)
+	if want := "thing failed (ECONNRESET); retry 1/2 in 0s"; len(warnings) != 1 || warnings[0] != want {
+		t.Errorf("warnings = %v, want [%q]", warnings, want)
 	}
 }
 
@@ -90,6 +90,7 @@ func TestDoesNotRetryAWrappedNonRetryableError(t *testing.T) {
 
 func TestWaitsOutADelayedErrorsOwnDelay(t *testing.T) {
 	calls := 0
+	var warnings []string
 	start := time.Now()
 
 	result, err := Do(context.Background(), func(context.Context) (string, error) {
@@ -98,7 +99,7 @@ func TestWaitsOutADelayedErrorsOwnDelay(t *testing.T) {
 			return "", &DelayedError{Message: "rate limited", Delay: 50 * time.Millisecond}
 		}
 		return "ok", nil
-	}, testOptions(nil))
+	}, testOptions(func(message string) { warnings = append(warnings, message) }))
 
 	if err != nil || result != "ok" {
 		t.Fatalf("Do = %q, %v, want ok, nil", result, err)
@@ -109,6 +110,10 @@ func TestWaitsOutADelayedErrorsOwnDelay(t *testing.T) {
 	// testOptions has no backoff of its own, so any wait came from the error.
 	if elapsed := time.Since(start); elapsed < 50*time.Millisecond {
 		t.Errorf("retried after %v, want at least the error's own 50ms delay", elapsed)
+	}
+	// The warning announces the error's delay, not the zero backoff.
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "in 50ms") {
+		t.Errorf("warnings = %v, want one mentioning in 50ms", warnings)
 	}
 }
 
