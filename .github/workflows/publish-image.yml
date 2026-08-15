@@ -29,7 +29,6 @@ jobs:
     permissions:
       contents: write
       packages: write
-      pull-requests: write
 
     steps:
       - name: Checkout
@@ -68,10 +67,13 @@ jobs:
       # action.yml is not a build input, so a commit that changes only this line
       # produces the same image. That is what makes publishing before the commit
       # that references the digest sound rather than circular.
-      - name: Open a pull request with the new digest
-        id: open-pr
+      #
+      # A branch and a compare URL rather than a pull request, for the reason
+      # given in licensed.yml: this repository does not let Actions open pull
+      # requests, deliberately.
+      - name: Push a branch with the new digest
+        id: push-branch
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DIGEST: ${{ steps.build.outputs.digest }}
           TAG: ${{ inputs.tag }}
         run: |
@@ -79,7 +81,7 @@ jobs:
           sed -i -E "s|^(  image: ).*|\1${image}|" action.yml
 
           if git diff --quiet -- action.yml; then
-            echo "action.yml already references ${DIGEST}; nothing to open."
+            echo "action.yml already references ${DIGEST}; nothing to push."
             exit 0
           fi
 
@@ -91,15 +93,5 @@ jobs:
           git commit -m "Point the action at the ${TAG} image"
           git push --set-upstream origin "$branch"
 
-          gh pr create \
-            --base "${GITHUB_REF_NAME}" \
-            --title "Point the action at the ${TAG} image" \
-            --body "Published \`${TAG}\` as \`${DIGEST}\`, built from \
-          \`${GITHUB_SHA}\`.
-
-          Merge this, then tag the merge commit. \`script/release\` checks that
-          the digest here is the one published under the tag being released.
-
-          Note: this pull request was created with \`GITHUB_TOKEN\`, and events
-          from that token do not start workflow runs, so its checks will be
-          empty. Close and reopen it to run them."
+          echo "Open a pull request to repoint action.yml:"
+          echo "  ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${branch}?expand=1"
