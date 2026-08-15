@@ -43,6 +43,17 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    ignore:
+      # Patch only for the builder. A Go minor bump has to move the go directive
+      # in go.mod and this image together, and Dependabot sees only the
+      # Dockerfile, so it cannot make that change correctly. Its tags are not
+      # semver either -- 1.27rc1 parses as newer than 1.26.6 rather than as a
+      # prerelease, so no version range excludes release candidates without
+      # also excluding the stable release.
+      - dependency-name: golang
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
     groups:
       docker-minor:
         update-types:
