@@ -22,10 +22,19 @@ const (
 // hands manifest requests to handler.
 func registryServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
+	return registryServerWithPing(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}, handler)
+}
+
+// registryServerWithPing is registryServer with the handshake observable: the
+// /v2/ ping goes to pingHandler instead of unconditionally succeeding.
+func registryServerWithPing(t *testing.T, pingHandler, handler http.HandlerFunc) *httptest.Server {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/v2/" || r.URL.Path == "/v2":
-			w.WriteHeader(http.StatusOK)
+			pingHandler(w, r)
 		case strings.HasPrefix(r.URL.Path, "/token"):
 			_, _ = w.Write([]byte(`{"token":"registry-token"}`))
 		default:
@@ -180,19 +189,13 @@ func TestRetriesATransientStatusOnlyThroughTheSharedBackoff(t *testing.T) {
 func TestReusesTheAuthHandshakeAcrossReads(t *testing.T) {
 	body := `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `"}`
 	pings := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/v2/" || r.URL.Path == "/v2":
-			pings++
-			w.WriteHeader(http.StatusOK)
-		case strings.HasPrefix(r.URL.Path, "/token"):
-			_, _ = w.Write([]byte(`{"token":"registry-token"}`))
-		default:
-			w.Header().Set("Content-Type", manifestMediaType)
-			_, _ = w.Write([]byte(body))
-		}
-	}))
-	t.Cleanup(server.Close)
+	server := registryServerWithPing(t, func(w http.ResponseWriter, _ *http.Request) {
+		pings++
+		w.WriteHeader(http.StatusOK)
+	}, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", manifestMediaType)
+		_, _ = w.Write([]byte(body))
+	})
 
 	client := newTestClient(t, server, "henrytill", "p")
 	for range 2 {
@@ -212,23 +215,17 @@ func TestReusesTheAuthHandshakeAcrossReads(t *testing.T) {
 func TestRetriesAFailedAuthHandshake(t *testing.T) {
 	body := `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `"}`
 	pings := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/v2/" || r.URL.Path == "/v2":
-			pings++
-			if pings == 1 {
-				w.WriteHeader(http.StatusBadGateway)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-		case strings.HasPrefix(r.URL.Path, "/token"):
-			_, _ = w.Write([]byte(`{"token":"registry-token"}`))
-		default:
-			w.Header().Set("Content-Type", manifestMediaType)
-			_, _ = w.Write([]byte(body))
+	server := registryServerWithPing(t, func(w http.ResponseWriter, _ *http.Request) {
+		pings++
+		if pings == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
 		}
-	}))
-	t.Cleanup(server.Close)
+		w.WriteHeader(http.StatusOK)
+	}, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", manifestMediaType)
+		_, _ = w.Write([]byte(body))
+	})
 
 	client := newTestClient(t, server, "henrytill", "p")
 	if _, err := client.ReadManifest(context.Background(), digestOf(body)); err != nil {
