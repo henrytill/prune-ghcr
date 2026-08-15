@@ -1,104 +1,85 @@
 # Copilot Instructions
 
-This GitHub Action is written in TypeScript and transpiled to JavaScript. Both
-the TypeScript sources and the **generated** JavaScript code are contained in
-this repository. The TypeScript sources are contained in the `src` directory and
-the JavaScript code is contained in the `dist` directory. A GitHub Actions
-workflow checks that the JavaScript code in `dist` is up-to-date. Therefore, you
-should not review any changes to the contents of the `dist` folder and it is
-expected that the JavaScript code in `dist` closely mirrors the TypeScript code
-it is generated from.
+This GitHub Action is a Go binary shipped as a Docker action. `action.yml`
+references a prebuilt image on `ghcr.io` **by digest**, so the action a consumer
+pins by commit SHA is the code that actually runs. An image has to be published
+before the commit that references it is tagged.
 
 ## Repository Structure
 
-| Path                 | Description                                              |
-| -------------------- | -------------------------------------------------------- |
-| `__fixtures__/`      | Unit Test Fixtures                                       |
-| `__tests__/`         | Unit Tests                                               |
-| `.devcontainer/`     | Development Container Configuration                      |
-| `.github/`           | GitHub Configuration                                     |
-| `.licenses/`         | License Information                                      |
-| `.vscode/`           | Visual Studio Code Configuration                         |
-| `badges/`            | Badges for readme                                        |
-| `dist/`              | Generated JavaScript Code                                |
-| `src/`               | TypeScript Source Code                                   |
-| `.env.example`       | Environment Variables Example for `@github/local-action` |
-| `.licensed.yml`      | Licensed Configuration                                   |
-| `.markdown-lint.yml` | Markdown Linter Configuration                            |
-| `.node-version`      | Node.js Version Configuration                            |
-| `.prettierrc.yml`    | Prettier Formatter Configuration                         |
-| `.yaml-lint.yml`     | YAML Linter Configuration                                |
-| `action.yml`         | GitHub Action Metadata                                   |
-| `CODEOWNERS`         | Code Owners File                                         |
-| `eslint.config.mjs`  | ESLint Configuration                                     |
-| `jest.config.js`     | Jest Configuration                                       |
-| `LICENSE`            | License File                                             |
-| `package.json`       | NPM Package Configuration                                |
-| `README.md`          | Project Documentation                                    |
-| `rollup.config.ts`   | Rollup Bundler Configuration                             |
-| `tsconfig.json`      | TypeScript Configuration                                 |
-
-## Environment Setup
-
-Install dependencies by running:
-
-```bash
-npm install
-```
+| Path                 | Description                                        |
+| -------------------- | -------------------------------------------------- |
+| `cmd/prune-ghcr/`    | Entry point: input handling and failure reporting  |
+| `internal/actions/`  | The Actions toolkit surface the action uses        |
+| `internal/api/`      | GitHub packages REST client, over `go-github`      |
+| `internal/registry/` | Manifest reads, over `go-containerregistry`        |
+| `internal/prune/`    | The pruning algorithm                              |
+| `internal/retry/`    | Linear backoff and the retryable-error vocabulary  |
+| `docs/`              | Working documents                                  |
+| `.devcontainer/`     | Development Container Configuration                |
+| `.github/`           | GitHub Configuration                               |
+| `.licenses/`         | License Information                                |
+| `.vscode/`           | Visual Studio Code Configuration                   |
+| `.env.example`       | Environment variables for a local run              |
+| `.golangci.yml`      | golangci-lint Configuration                        |
+| `.licensed.yml`      | Licensed Configuration                             |
+| `.markdown-lint.yml` | Markdown Linter Configuration                      |
+| `.prettierrc.yml`    | Prettier Formatter Configuration                   |
+| `.trivyignore`       | Trivy suppressions, mirroring the Dockerfile's own |
+| `.yaml-lint.yml`     | YAML Linter Configuration                          |
+| `action.yml`         | GitHub Action Metadata                             |
+| `CODEOWNERS`         | Code Owners File                                   |
+| `Dockerfile`         | Builds the image the action runs                   |
+| `go.mod`, `go.sum`   | Go Module Definition                               |
+| `LICENSE`            | License File                                       |
+| `README.md`          | Project Documentation                              |
 
 ## Testing
 
-Ensure all unit tests pass by running:
-
 ```bash
-npm run test
+go test ./...
 ```
 
-Unit tests should exist in the `__tests__` directory. They are powered by
-`jest`. Fixtures should be placed in the `__fixtures__` directory.
+Tests live beside the code they test, as `_test.go` files. Collaborators are
+reached through interfaces declared in the consuming package, so the tests use
+plain fakes; `httptest` covers the HTTP clients. There is no mocking framework.
 
-## Bundling
+## Static Analysis
 
-Any time files in the `src` directory are changed, you should run the following
-command to bundle the TypeScript code into JavaScript:
+`golangci-lint` is the single owner, configured by `.golangci.yml`. It already
+includes `govet` and `staticcheck`, so do not add those as separate steps.
 
 ```bash
-npm run bundle
+go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run ./...
 ```
 
 ## General Coding Guidelines
 
-- Follow standard TypeScript and JavaScript coding conventions and best
-  practices
+- Follow standard Go conventions; keep `gofmt` clean
 - Changes should maintain consistency with existing patterns and style
 - Document changes clearly and thoroughly, including updates to existing
   comments when appropriate
 - Do not include basic, unnecessary comments that simply restate what the code
   is doing (focus on explaining _why_, not _what_)
-- Use consistent error handling patterns throughout the codebase
-- Use TypeScript's type system to ensure type safety and clarity
+- Wrap errors with `%w` and enough context to locate the failure
+- Throw `NonRetryableError`, or build the error with `retry.StatusError`, for
+  permanent failures: retrying a 403 or a 404 only burns the backoff
 - Keep functions focused and manageable
-- Use descriptive variable and function names that clearly convey their purpose
-- Use JSDoc comments to document functions, classes, and complex logic
-- After doing any refactoring, ensure to run `npm run test` to ensure that all
-  tests still pass and coverage requirements are met
-- When suggesting code changes, always opt for the most maintainable approach.
-  Try your best to keep the code clean and follow "Don't Repeat Yourself" (DRY)
-  principles
-- Avoid unnecessary complexity and always consider the long-term maintainability
-  of the code
-- When writing unit tests, try to consider edge cases as well as the main path
-  of success. This will help ensure that the code is robust and can handle
-  unexpected inputs or situations
-- Use the `@actions/core` package for logging over `console` to ensure
-  compatibility with GitHub Actions logging features
+- Use descriptive names that clearly convey their purpose
+- Document exported identifiers with a comment beginning with the name
+- Use `internal/actions` for logging rather than `fmt.Print` or `log`, so output
+  reaches the workflow log as a workflow command
+- After refactoring, run `go test ./...` and the linter above
+- When writing tests, consider edge cases as well as the main path of success
+- Avoid unnecessary complexity and always consider long-term maintainability
 
 ### Versioning
 
-GitHub Actions are versioned using branch and tag names. Please ensure the
-version in the project's `package.json` is updated to reflect the changes made
-in the codebase. The version should follow
-[Semantic Versioning](https://semver.org/) principles.
+GitHub Actions are versioned by branch and tag name, following
+[Semantic Versioning](https://semver.org/). There is no version field in a
+manifest to update; the tag is the version of record. `script/release` moves the
+tags, and it will ask whether the image has been published and `action.yml`
+repointed at its digest first.
 
 ## Pull Request Guidelines
 
@@ -106,11 +87,7 @@ When creating a pull request (PR), please ensure that:
 
 - Keep changes focused and minimal (avoid large changes, or consider breaking
   them into separate, smaller PRs)
-- Formatting checks pass
-- Linting checks pass
-- Unit tests pass and coverage requirements are met
-- The action has been transpiled to JavaScript and the `dist` directory is
-  up-to-date with the latest changes in the `src` directory
+- Formatting, linting, and tests pass
 - If necessary, the `README.md` file is updated to reflect any changes in
   functionality or usage
 
@@ -128,3 +105,8 @@ When performing a code review, please follow these guidelines:
 - If there are changes that modify the functionality/usage of the action,
   validate that there are changes in the `README.md` file that document the new
   or modified functionality
+- The invariants in `internal/prune` are the reasons the action is correct: a
+  tagged manifest that cannot be read aborts the whole run, a version with no
+  usable timestamp is skipped rather than deleted, and individual delete
+  failures are counted before failing at the end. Treat changes to them as
+  significant.

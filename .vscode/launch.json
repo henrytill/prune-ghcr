@@ -3,13 +3,13 @@
   "configurations": [
     {
       "name": "Debug Action",
-      "type": "node",
+      "type": "go",
       "request": "launch",
-      "runtimeExecutable": "npx",
-      "cwd": "${workspaceRoot}",
-      "args": ["@github/local-action", ".", "src/main.ts", ".env"],
+      "mode": "debug",
+      "program": "${workspaceFolder}/cmd/prune-ghcr",
+      "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "skipFiles": ["<node_internals>/**", "node_modules/**"]
+      "envFile": "${workspaceFolder}/.env"
     }
   ]
 }
