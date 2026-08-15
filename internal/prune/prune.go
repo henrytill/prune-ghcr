@@ -66,6 +66,12 @@ func target(owner, packageName, login string) api.Target {
 // The per-platform and attestation manifests under an image index carry no tags
 // of their own, which is why a naive "delete every untagged version" deletes the
 // contents of the image the tag points at.
+//
+// Only the tagged manifests themselves are read: a child that is itself an
+// index would need its own children walked, and they are not. Nothing that
+// pushes to GHCR produces nested indexes today -- buildx emits one level of
+// platform and attestation manifests -- so the walk assumes one level rather
+// than recursing speculatively.
 func referenced(
 	ctx context.Context,
 	all []api.ContainerVersion,
