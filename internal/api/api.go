@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -78,7 +79,16 @@ func NewClient(token, baseURL string, warn func(string)) (*Client, error) {
 // statusError converts a go-github failure into an error that says whether
 // retrying could help, so a 403 or 404 fails immediately instead of burning
 // the backoff.
+//
+// Rate limits stay retryable even though they answer 403: go-github reports
+// them as their own error types, and unlike a permissions 403, waiting is
+// exactly what fixes them.
 func statusError(response *github.Response, err error) error {
+	var rateLimited *github.RateLimitError
+	var abuseLimited *github.AbuseRateLimitError
+	if errors.As(err, &rateLimited) || errors.As(err, &abuseLimited) {
+		return err
+	}
 	if response == nil || response.Response == nil {
 		return err
 	}

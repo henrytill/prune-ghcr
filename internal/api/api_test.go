@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-github/v90/github"
 
@@ -246,6 +248,41 @@ func TestFailsOnAnErrorStatusIncludingTheBody(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "403") || !strings.Contains(err.Error(), "Forbidden") {
 		t.Errorf("error = %q, want it to mention 403 and Forbidden", err)
+	}
+}
+
+// TestRetriesARateLimit guards the carve-out in statusError: a rate limit
+// answers 403 like a permissions failure, but waiting fixes it, so it must
+// stay retryable.
+func TestRetriesARateLimit(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			// A reset already in the past keeps go-github's client-side
+			// limiter from short-circuiting the second request.
+			w.Header().Set("X-RateLimit-Limit", "60")
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.Header().Set("X-RateLimit-Reset",
+				strconv.FormatInt(time.Now().Add(-time.Second).Unix(), 10))
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"login":"henrytill"}`))
+	}))
+	defer server.Close()
+
+	login, err := newTestClient(t, server).AuthenticatedLogin(context.Background())
+	if err != nil {
+		t.Fatalf("AuthenticatedLogin: %v", err)
+	}
+
+	if login != "henrytill" {
+		t.Errorf("login = %q, want henrytill", login)
+	}
+	if calls != 2 {
+		t.Errorf("made %d requests, want 2: a rate limit must be retried", calls)
 	}
 }
 
