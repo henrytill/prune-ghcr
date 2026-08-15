@@ -43,10 +43,9 @@ outputs:
     description: Number of versions that failed to delete.
 
 runs:
-  # Builds on the runner, which is the slow path. The publish workflow replaces
-  # this with an immutable reference to a prebuilt image before the first tag:
-  #   image: docker://ghcr.io/henrytill/prune-ghcr@sha256:...
-  # Until then this keeps the action runnable from the branch, so the container
-  # plumbing can be verified before an image exists.
+  # By digest, not by tag. A consumer pinning this action by commit SHA expects
+  # that to pin the code that runs; against a mutable tag it would pin only this
+  # file. script/release must repoint this after each publish, which is the
+  # trade for that guarantee.
   using: docker
-  image: Dockerfile
+  image: docker://ghcr.io/henrytill/prune-ghcr@sha256:23d58adfe5a4be883e9d6fedbdb47df6038b8db2badfd0e80ebe6e4499d957e1
