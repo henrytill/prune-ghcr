@@ -40,13 +40,21 @@ jobs:
 
       # The single owner of Go static analysis: vet, staticcheck and errcheck
       # all arrive through golangci-lint's standard set, so none of them runs
-      # separately. Pinned rather than @latest, so a release cannot turn CI red
-      # without a commit. See linter.yml for why super-linter does not do this.
+      # separately. See linter.yml for why super-linter does not do this.
+      #
+      # The action installs a prebuilt binary. `go run ...@v2.12.2` compiled it
+      # from source on every run, which cost around 67s of a 111s job and never
+      # amortized: setup-go's cache is keyed on go.sum and only written on a key
+      # miss, so a build the key does not cover is restored but never saved.
+      #
+      # Two pins, both required. The SHA pins the action, and `version` pins the
+      # linter, so neither an action release nor a linter release can turn CI
+      # red without a commit. Bump them independently.
       - name: Lint
         id: golangci-lint
-        run: |
-          go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 \
-            run ./...
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.12.2
 
       - name: Test
         id: test
