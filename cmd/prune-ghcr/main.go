@@ -89,12 +89,16 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	for name, value := range map[string]int{
-		"deleted": result.Deleted,
-		"kept":    result.Kept,
-		"failed":  result.Failed,
-	} {
-		if err := actions.SetOutput(name, strconv.Itoa(value)); err != nil {
+	outputs := []struct {
+		name  string
+		value int
+	}{
+		{"deleted", result.Deleted},
+		{"kept", result.Kept},
+		{"failed", result.Failed},
+	}
+	for _, output := range outputs {
+		if err := actions.SetOutput(output.name, strconv.Itoa(output.value)); err != nil {
 			return err
 		}
 	}
