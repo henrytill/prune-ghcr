@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -44,7 +45,7 @@ func run(ctx context.Context) error {
 		return r
 	}, actions.Input("token"))
 	if token == "" {
-		return fmt.Errorf("token input is empty (is the PAT secret set?)")
+		return errors.New("token input is empty (is the PAT secret set?)")
 	}
 
 	// Masks the stripped form too: the raw secret is already masked, but the
@@ -53,11 +54,11 @@ func run(ctx context.Context) error {
 
 	owner := actions.Input("owner")
 	if owner == "" {
-		return fmt.Errorf("owner input is empty")
+		return errors.New("owner input is empty")
 	}
 	packageName := actions.Input("package")
 	if packageName == "" {
-		return fmt.Errorf("package input is empty")
+		return errors.New("package input is empty")
 	}
 
 	dryRun, err := actions.BoolInput("dry-run")
