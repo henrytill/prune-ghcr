@@ -49,18 +49,32 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Every build input has to be a function of the source, timestamps
+      # included, or the image is not reproducible. The commit date is the one
+      # clock a third party rebuilding this commit also has.
+      - name: Resolve SOURCE_DATE_EPOCH
+        id: epoch
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >>"$GITHUB_ENV"
+
       # Go cross-compiles, so both platforms build natively on the runner and
       # no QEMU emulation is involved.
+      #
+      # `outputs` rather than `push: true`, which is the same registry export
+      # without the `rewrite-timestamp` attribute. SOURCE_DATE_EPOCH alone only
+      # fixes the image config's created time; the layers COPY produces still
+      # carry the build time, and rewriting those is what makes the digest
+      # stable. See docs/releasing.md.
       - name: Build and Push
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
+          outputs: type=image,push=true,rewrite-timestamp=true
           tags: ghcr.io/${{ github.repository }}:${{ inputs.tag }}
           # The revision is what makes the pin auditable: given a digest, the
-          # commit it was built from can be read back out of the image.
+          # commit it was built from can be read back out of the image. It is
+          # also a build input, so a rebuild has to pass the same value.
           labels: org.opencontainers.image.revision=${{ github.sha }}
           provenance: false
 
