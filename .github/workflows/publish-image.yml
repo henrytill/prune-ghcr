@@ -70,7 +70,7 @@ jobs:
       # gives the same image two digests and makes a rebuild look like a
       # mismatch. buildx documents this exporter as defaulting it to false and
       # `type=oci` to true, but the images pushed from here have been OCI
-      # indexes anyway; naming it means the parity does not depend on which of
+      # indices anyway; naming it means the parity does not depend on which of
       # those is accurate.
       - name: Build and Push
         id: build
