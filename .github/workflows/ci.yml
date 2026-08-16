@@ -137,11 +137,24 @@ jobs:
       - name: Compare digests
         id: compare
         run: |
-          a=$(jq -r '.manifests[0].digest' /tmp/image-a/index.json)
-          b=$(jq -r '.manifests[0].digest' /tmp/image-b/index.json)
+          a=$(jq -r '.manifests[0].digest // ""' /tmp/image-a/index.json)
+          b=$(jq -r '.manifests[0].digest // ""' /tmp/image-b/index.json)
 
           echo "first build:  $a"
           echo "second build: $b"
+
+          # Without this, an index that stops carrying a digest where these read
+          # for one leaves both empty, and a guard that compares nothing against
+          # nothing passes.
+          for d in "$a" "$b"; do
+            case "$d" in
+              sha256:[0-9a-f]*) ;;
+              *)
+                echo "::error::not a digest: '${d}'"
+                exit 1
+                ;;
+            esac
+          done
 
           if [ "$a" != "$b" ]; then
             echo "::error::the image is not reproducible: $a != $b"
