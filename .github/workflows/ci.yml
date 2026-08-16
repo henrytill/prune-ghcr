@@ -274,6 +274,12 @@ jobs:
       # straight into the local docker: a throwaway to execute rather than an
       # artifact to compare, so none of the flags that make a digest reproducible
       # apply and it does not go through .github/actions/build-image.
+      #
+      # A fourth build of the same source in one pull request, deliberately.
+      # reproducible-image already pushes one to its registry service, and this
+      # assertion could be a step there for free - but then a red
+      # reproducible-image would take this signal down with it, and both are
+      # required checks. Independent jobs cost 35s and fail one at a time.
       - name: Build this branch's image
         id: build
         run: docker build -t prune-ghcr:ci .
