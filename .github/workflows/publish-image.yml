@@ -60,9 +60,22 @@ jobs:
       # Every build input has to be a function of the source, timestamps
       # included, or the image is not reproducible. The commit date is the one
       # clock a third party rebuilding this commit also has.
+      #
+      # An empty value is a hard failure rather than an empty assignment, which
+      # buildx reads as unset: `rewrite-timestamp` would then rewrite nothing,
+      # the published image would carry build times, and nothing would go red
+      # until someone tried to verify the release.
       - name: Resolve SOURCE_DATE_EPOCH
         id: epoch
-        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >>"$GITHUB_ENV"
+        run: |
+          epoch=$(git log -1 --pretty=%ct)
+          case "$epoch" in
+            '' | *[!0-9]*)
+              echo "::error::no commit date for SOURCE_DATE_EPOCH: '${epoch}'"
+              exit 1
+              ;;
+          esac
+          echo "SOURCE_DATE_EPOCH=${epoch}" >>"$GITHUB_ENV"
 
       # Go cross-compiles, so both platforms build natively on the runner and
       # no QEMU emulation is involved.

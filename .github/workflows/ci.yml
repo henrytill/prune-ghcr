@@ -101,7 +101,15 @@ jobs:
       # The same value publish-image.yml derives, for the same reason.
       - name: Resolve SOURCE_DATE_EPOCH
         id: epoch
-        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >>"$GITHUB_ENV"
+        run: |
+          epoch=$(git log -1 --pretty=%ct)
+          case "$epoch" in
+            '' | *[!0-9]*)
+              echo "::error::no commit date for SOURCE_DATE_EPOCH: '${epoch}'"
+              exit 1
+              ;;
+          esac
+          echo "SOURCE_DATE_EPOCH=${epoch}" >>"$GITHUB_ENV"
 
       # An OCI layout rather than a registry push: nothing here has anywhere to
       # push to, and the digest an image exporter computes does not depend on
