@@ -88,7 +88,7 @@ jobs:
         id: compare
         if: steps.plan.outputs.changed == 'true'
         run: |
-          script/assert-digest "$DIGEST" /tmp/image
+          script/assert-digest "$DIGEST" "$(script/layout-digest /tmp/image)"
           {
             echo "### Pinned digest verified"
             echo
