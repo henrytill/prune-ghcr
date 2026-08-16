@@ -87,6 +87,14 @@ registry_get() {
 	curl -sL --fail "${auth[@]}" -H "Accept: ${accept}" "https://${host}/v2/${repository}/$1"
 }
 
+# The manifest Accept list is for manifests. A blob is bytes, and a registry that
+# takes Accept seriously could answer a blob request with 406 - which would
+# surface below as the image having no revision label, blaming the image for a
+# transport failure.
+registry_get_blob() {
+	curl -sL --fail "${auth[@]}" -H 'Accept: */*' "https://${host}/v2/${repository}/blobs/$1"
+}
+
 if ! document=$(registry_get "manifests/${reference}"); then
 	echo "cannot read ${image} from ${host}" >&2
 	exit 1
@@ -99,7 +107,10 @@ if [[ $(jq -r 'has("manifests")' <<<"$document") == true ]]; then
 		echo "${image} is an index naming no manifests" >&2
 		exit 1
 	fi
-	document=$(registry_get "manifests/${child}")
+	if ! document=$(registry_get "manifests/${child}"); then
+		echo "cannot read ${child} from ${host}" >&2
+		exit 1
+	fi
 fi
 
 config=$(jq -r '.config.digest // empty' <<<"$document")
@@ -108,8 +119,15 @@ if [[ -z $config ]]; then
 	exit 1
 fi
 
-revision=$(registry_get "blobs/${config}" |
-	jq -r '.config.Labels["org.opencontainers.image.revision"] // empty')
+# Fetched before it is parsed, rather than piped into jq: a pipeline reports
+# jq's status, so a failed fetch would arrive as an empty label and be reported
+# as the image not carrying one.
+if ! blob=$(registry_get_blob "$config"); then
+	echo "cannot read the image config of ${image} from ${host}" >&2
+	exit 1
+fi
+
+revision=$(jq -r '.config.Labels["org.opencontainers.image.revision"] // empty' <<<"$blob")
 
 if [[ -z $revision ]]; then
 	echo "${image} carries no org.opencontainers.image.revision label" >&2
