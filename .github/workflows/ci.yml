@@ -119,7 +119,12 @@ jobs:
             [registry."localhost:5000"]
               http = true
 
-      # The same value publish-image.yml derives, for the same reason.
+      # Derived the way publish-image.yml derives it, and for the same reason,
+      # but not the same value: on a pull request the checkout is GitHub's
+      # synthetic merge commit, so this is that commit's date and the label
+      # below is its SHA. What the three builds here have to agree on is each
+      # other, and they do; the value a release will use is whatever the merged
+      # commit carries.
       - name: Resolve SOURCE_DATE_EPOCH
         id: epoch
         run: |
