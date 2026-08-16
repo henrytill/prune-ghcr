@@ -58,6 +58,16 @@ fi
 host="${name%%/*}"
 repository="${name#*/}"
 
+# A registry host is what the first component is, not what it looks like, so
+# require it to be recognisable as one. Without this, `prune-ghcr:v2` asks
+# https://prune-ghcr for a repository named prune-ghcr and fails as though the
+# registry were down; `docker.io/alpine` misses the implicit library/ namespace
+# the same way. Both are bad references and should read as bad references.
+if [[ $name != */* || ( $host != *.* && $host != *:* && $host != localhost ) ]]; then
+	echo "${image} needs a registry host, e.g. ghcr.io/owner/name@sha256:..." >&2
+	exit 2
+fi
+
 # docker.io is the name people write and not the one that serves the API.
 if [[ $host == docker.io ]]; then
 	host=registry-1.docker.io
