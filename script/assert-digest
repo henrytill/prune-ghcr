@@ -28,13 +28,12 @@ fi
 built=$(jq -r '.manifests[0].digest // ""' "${layout}/index.json")
 
 for digest in "$expected" "$built"; do
-	case $digest in
-	sha256:[0-9a-f]*) ;;
-	*)
+	# The length matters: `sha256:[0-9a-f]*` would accept a bare `sha256:`, and
+	# two of those compare equal.
+	if [[ ! $digest =~ ^sha256:[0-9a-f]{64}$ ]]; then
 		echo "not a digest: '${digest}'" >&2
 		exit 1
-		;;
-	esac
+	fi
 done
 
 if [[ $built != "$expected" ]]; then
