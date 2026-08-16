@@ -63,8 +63,9 @@ jobs:
           config: ./.testcoverage.yml
 
   # Builds the image twice from the same source and fails if the two digests
-  # differ. Publishing sets SOURCE_DATE_EPOCH and rewrite-timestamp so that
-  # rebuilding a commit reproduces the digest action.yml pins; the failure mode
+  # differ, then a third time to check the two exporters agree. Publishing sets
+  # SOURCE_DATE_EPOCH and rewrite-timestamp so that rebuilding a commit
+  # reproduces the digest action.yml pins; the failure mode
   # that guards against is a new source of nondeterminism landing unnoticed and
   # only surfacing at release time, which is what this job moves to pull
   # request time.
@@ -76,9 +77,23 @@ jobs:
   # the Dockerfile, buildx and buildkit on the Set Up Buildx step below. The
   # action SHA pins none of the latter two - it pins the action, which otherwise
   # installs the newest buildx and runs the mutable `buildx-stable-1` buildkit.
+  #
+  # A third build then pushes through the `type=image` exporter that publishing
+  # uses, because the equivalence this job would otherwise assume - that the two
+  # exporters produce identical bytes - is the one that decides whether an
+  # outside reproduction of a published digest can ever match.
   reproducible-image:
     name: Reproducible Image
     runs-on: ubuntu-latest
+
+    # Somewhere for that third build to push. A pull request has no credentials
+    # for ghcr.io, and does not need any: the manifest bytes a push produces do
+    # not depend on which registry receives them.
+    services:
+      registry:
+        image: registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+        ports:
+          - 5000:5000
 
     steps:
       - name: Checkout
@@ -87,9 +102,11 @@ jobs:
         with:
           persist-credentials: false
 
-      # Two pins, and publish-image.yml has to carry both unchanged: `version`
-      # pins the buildx CLI, `image` pins buildkit, and the action SHA pins
-      # neither.
+      # Three pins, and publish-image.yml has to carry the first two unchanged:
+      # `version` pins the buildx CLI, `image` pins buildkit, and the action SHA
+      # pins neither. `network=host` and the inline config are what let the
+      # builder reach the registry service over plain HTTP, and neither one
+      # affects the bytes a build produces.
       - name: Set Up Buildx
         id: buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -97,6 +114,10 @@ jobs:
           version: v0.36.1
           driver-opts: |
             image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+            network=host
+          buildkitd-config-inline: |
+            [registry."localhost:5000"]
+              http = true
 
       # The same value publish-image.yml derives, for the same reason.
       - name: Resolve SOURCE_DATE_EPOCH
@@ -111,10 +132,11 @@ jobs:
           esac
           echo "SOURCE_DATE_EPOCH=${epoch}" >>"$GITHUB_ENV"
 
-      # An OCI layout rather than a registry push: nothing here has anywhere to
-      # push to, and the digest an image exporter computes does not depend on
-      # where the bytes land. Every flag that affects the digest has to match
-      # what publish-image.yml passes, or this job proves the wrong thing.
+      # An OCI layout rather than a registry push, which keeps the pair of
+      # builds being compared for determinism off the network entirely; the
+      # digest an image exporter computes does not depend on where the bytes
+      # land. Every flag that affects the digest has to match what
+      # publish-image.yml passes, or this job proves the wrong thing.
       #
       # `oci-mediatypes=true` is already the default for `type=oci`, and is
       # written out anyway: it is not the default for the exporter publishing
@@ -142,19 +164,39 @@ jobs:
           provenance: false
           no-cache: true
 
+      # The exporter publishing uses, against a throwaway registry. Everything
+      # else matches the two builds above, so a digest that differs here is a
+      # difference between the exporters and nothing else - which would mean the
+      # recipe in docs/releasing.md can never reproduce a published digest, no
+      # matter how deterministic the build is. Cache reuse is fine: this
+      # compares exporters, not determinism.
+      - name: Rebuild through the pushing exporter
+        id: parity
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          outputs: type=image,push=true,rewrite-timestamp=true,oci-mediatypes=true
+          tags: localhost:5000/prune-ghcr:ci
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          provenance: false
+
       - name: Compare digests
         id: compare
+        env:
+          PUSHED: ${{ steps.parity.outputs.digest }}
         run: |
           a=$(jq -r '.manifests[0].digest // ""' /tmp/image-a/index.json)
           b=$(jq -r '.manifests[0].digest // ""' /tmp/image-b/index.json)
 
           echo "first build:  $a"
           echo "second build: $b"
+          echo "pushed build: $PUSHED"
 
           # Without this, an index that stops carrying a digest where these read
-          # for one leaves both empty, and a guard that compares nothing against
-          # nothing passes.
-          for d in "$a" "$b"; do
+          # for one leaves all three empty, and a guard that compares nothing
+          # against nothing passes.
+          for d in "$a" "$b" "$PUSHED"; do
             case "$d" in
               sha256:[0-9a-f]*) ;;
               *)
@@ -169,8 +211,13 @@ jobs:
             exit 1
           fi
 
+          if [ "$a" != "$PUSHED" ]; then
+            echo "::error::the exporters disagree: $a != $PUSHED"
+            exit 1
+          fi
+
           echo "### Reproducible image" >>"$GITHUB_STEP_SUMMARY"
-          echo "Built twice, both \`$a\`." >>"$GITHUB_STEP_SUMMARY"
+          echo "Built three times, all \`$a\`." >>"$GITHUB_STEP_SUMMARY"
 
   # An end-to-end run needs a PAT and a real package, neither of which a fork's
   # pull request has; see the dry-run workflow for that.
