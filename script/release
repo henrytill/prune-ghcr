@@ -73,11 +73,16 @@ fi
 # an older digest ships older code under a new version.
 echo -e "Checking that ${BOLD_BLUE}action.yml${OFF} references the ${BOLD_BLUE}$new_tag${OFF} image..."
 
-pinned_digest=$(grep -oE 'sha256:[0-9a-f]{64}' action.yml | head -1)
-if [[ -z $pinned_digest ]]; then
+# Through script/pinned-image, which reads the image line rather than the first
+# thing in the file shaped like a digest. The two disagree the moment action.yml
+# mentions a digest anywhere else -- a comment, a second image -- and this is the
+# check standing between a mis-ordered release and a broken pin.
+if ! pinned_image=$(script/pinned-image HEAD); then
 	echo -e "${BOLD_RED}action.yml does not reference an image by digest${OFF}"
 	exit 1
 fi
+
+pinned_digest="${pinned_image#*@}"
 
 package="${GITHUB_REPOSITORY##*/}"
 package="${package:-prune-ghcr}"

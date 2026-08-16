@@ -70,17 +70,13 @@ jobs:
       # An empty value is a hard failure rather than an empty assignment, which
       # buildx reads as unset: `rewrite-timestamp` would then rewrite nothing,
       # the published image would carry build times, and nothing would go red
-      # until someone tried to verify the release.
+      # until someone tried to verify the release. script/source-date-epoch is
+      # where that check lives, and assigning before the echo is what keeps it
+      # from being bypassed by the substitution's status being discarded.
       - name: Resolve SOURCE_DATE_EPOCH
         id: epoch
         run: |
-          epoch=$(git log -1 --pretty=%ct)
-          case "$epoch" in
-            '' | *[!0-9]*)
-              echo "::error::no commit date for SOURCE_DATE_EPOCH: '${epoch}'"
-              exit 1
-              ;;
-          esac
+          epoch=$(script/source-date-epoch)
           echo "SOURCE_DATE_EPOCH=${epoch}" >>"$GITHUB_ENV"
 
       # Go cross-compiles, so both platforms build natively on the runner and
