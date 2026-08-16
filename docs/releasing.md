@@ -203,10 +203,13 @@ installed:
 #
 # script/image-revision asks the registry with curl and jq, so it needs no
 # container runtime at all - which is the point, here of all places.
+# Chained: this is meant to be pasted into a shell that has no `set -e`, and
+# building with an empty revision is how you get an image that cannot match and
+# a mismatch that looks like nondeterminism.
 image=ghcr.io/henrytill/prune-ghcr@<the digest being reproduced>
-rev=$(script/image-revision "$image")
-git checkout "$rev"
-epoch=$(script/source-date-epoch "$rev")
+rev=$(script/image-revision "$image") &&
+	git checkout "$rev" &&
+	epoch=$(script/source-date-epoch "$rev")
 
 # Cleared, not just created: buildctl failing would otherwise leave the previous
 # run's layout in place for the comparison below to pass on.
