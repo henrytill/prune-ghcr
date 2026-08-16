@@ -1,0 +1,63 @@
+#!/bin/bash
+
+# Exit early
+# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
+set -e
+
+# About:
+#
+# Runs an image of this action the way the runner would - inputs as INPUT_<NAME>
+# environment variables, hyphens preserved - and fails unless an empty token is
+# reported as a misconfiguration and exits non-zero.
+#
+# That invariant is the one worth holding onto: a token that arrives empty means
+# a misconfigured secret, and the alternative to failing is a green run that
+# quietly stopped pruning. cmd/prune-ghcr/main.go checks it before anything else,
+# so this needs no network and no real package.
+#
+# Takes an image rather than building one, so that it can be pointed at a local
+# build, at the image action.yml pins, or at anything else claiming to be this
+# action.
+#
+# Usage:
+#
+# script/smoke-test-image <image>
+#
+# e.g. docker build -t prune-ghcr:test . && script/smoke-test-image prune-ghcr:test
+
+image="$1"
+
+if [[ -z $image ]]; then
+	echo "usage: script/smoke-test-image <image>" >&2
+	exit 2
+fi
+
+# Owner and package are set to something harmless: the token is checked first,
+# so a failure here is unambiguously about the token and not about a missing
+# input further down. GITHUB_OUTPUT has to be somewhere writable - the action
+# treats it being unset as an error of its own.
+output=$(docker run --rm \
+	-e INPUT_TOKEN='' \
+	-e "INPUT_DRY-RUN=true" \
+	-e INPUT_OWNER=octocat \
+	-e INPUT_PACKAGE=example \
+	-e "INPUT_MIN-AGE-HOURS=0" \
+	-e GITHUB_OUTPUT=/dev/null \
+	"$image" 2>&1) && status=0 || status=$?
+
+echo "$output"
+
+if [[ $status -eq 0 ]]; then
+	echo "expected ${image} to fail on an empty token, but it succeeded" >&2
+	exit 1
+fi
+
+# The message and not just the exit code: a container that failed to start, or
+# died on something else entirely, also exits non-zero, and would otherwise pass
+# for the behavior being asserted.
+if ! grep -qF '::error::token input is empty' <<<"$output"; then
+	echo "${image} failed, but not with the empty-token error" >&2
+	exit 1
+fi
+
+echo "${image} rejects an empty token"
