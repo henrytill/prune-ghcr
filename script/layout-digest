@@ -1,0 +1,35 @@
+#!/bin/bash
+
+# Exit early
+# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
+set -e
+
+# About:
+#
+# Prints the digest of the image an OCI layout directory holds - what buildx
+# writes with `--output type=oci,dest=<dir>,tar=false`, and the value to compare
+# against a digest a registry reports.
+#
+# An index that carries no digest where this reads for one prints nothing, and
+# comparing nothing against nothing passes, so an empty result is a failure here
+# rather than something for every caller to remember to check.
+#
+# Usage:
+#
+# script/layout-digest <oci-layout-dir>
+
+layout="$1"
+
+if [[ -z $layout ]]; then
+	echo "usage: script/layout-digest <oci-layout-dir>" >&2
+	exit 2
+fi
+
+digest=$(jq -r '.manifests[0].digest // ""' "${layout}/index.json")
+
+if [[ -z $digest ]]; then
+	echo "${layout}/index.json names no digest" >&2
+	exit 1
+fi
+
+echo "$digest"

@@ -6,39 +6,39 @@ set -e
 
 # About:
 #
-# Compares the digest of an OCI layout against the digest it is expected to
-# have, and fails if they differ.
+# Fails unless every digest given is the same digest. Takes digests rather than
+# places to find them, so that one comparison covers an OCI layout against a
+# pushed image, a build against a rebuild, or a rebuild against what action.yml
+# pins - see script/layout-digest for turning a layout into one of these.
 #
-# Anything that is not a digest fails too. `jq` prints an empty string for an
-# index that carries no digest where this reads for one, and a comparison of
-# nothing against nothing passes - which is how a check quietly stops checking.
+# Anything that is not a full digest fails too. `sha256:[0-9a-f]*` would accept
+# a bare `sha256:`, and two of those compare equal, which is how a check quietly
+# stops checking.
+#
+# What is being compared is the caller's to say: this reports which values
+# differed, not what that means.
 #
 # Usage:
 #
-# script/assert-digest <expected-digest> <oci-layout-dir>
+# script/assert-digest <digest> <digest>...
 
-expected="$1"
-layout="$2"
-
-if [[ -z $expected || -z $layout ]]; then
-	echo "usage: script/assert-digest <expected-digest> <oci-layout-dir>" >&2
+if [[ $# -lt 2 ]]; then
+	echo "usage: script/assert-digest <digest> <digest>..." >&2
 	exit 2
 fi
 
-built=$(jq -r '.manifests[0].digest // ""' "${layout}/index.json")
+expected="$1"
 
-for digest in "$expected" "$built"; do
-	# The length matters: `sha256:[0-9a-f]*` would accept a bare `sha256:`, and
-	# two of those compare equal.
+for digest in "$@"; do
 	if [[ ! $digest =~ ^sha256:[0-9a-f]{64}$ ]]; then
 		echo "not a digest: '${digest}'" >&2
 		exit 1
 	fi
+
+	if [[ $digest != "$expected" ]]; then
+		echo "digests differ: ${expected} and ${digest}" >&2
+		exit 1
+	fi
 done
 
-if [[ $built != "$expected" ]]; then
-	echo "expected ${expected}, built ${built}" >&2
-	exit 1
-fi
-
-echo "$built"
+echo "$expected"
