@@ -23,10 +23,11 @@ Ensure you adhere to the following guidelines when creating release notes:
 
 ## Versioning
 
-GitHub Actions are versioned using branch and tag names. The version in the
-project's `package.json` should reflect the changes made in the codebase and
-follow [Semantic Versioning](https://semver.org/) principles. Depending on the
-nature of the changes, please make sure to adjust the release notes accordingly:
+GitHub Actions are versioned using branch and tag names. There is no version
+recorded in the source: the release tag is the version, and it should reflect
+the changes made in the codebase and follow
+[Semantic Versioning](https://semver.org/) principles. Depending on the nature
+of the changes, please make sure to adjust the release notes accordingly:
 
 - For **major** changes, include a detailed description of the breaking changes
   and how users can adapt to them
