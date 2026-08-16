@@ -69,10 +69,13 @@ jobs:
   # only surfacing at release time, which is what this job moves to pull
   # request time.
   #
-  # Both builds run on one runner, so this catches what a build embeds -
-  # timestamps, random ordering, an unpinned dependency resolved twice - and not
-  # dependence on the runner image or the buildkit version. Those are pinned
-  # elsewhere: the toolchain in the Dockerfile, buildkit by the setup-buildx pin.
+  # Both builds run on one runner with one builder, so this catches what a build
+  # embeds - timestamps, random ordering, an unpinned dependency resolved twice
+  # - and not dependence on a version both builds happen to share. Those inputs
+  # have to be pinned rather than compared: the toolchain and the frontend in
+  # the Dockerfile, buildx and buildkit on the Set Up Buildx step below. The
+  # action SHA pins none of the latter two - it pins the action, which otherwise
+  # installs the newest buildx and runs the mutable `buildx-stable-1` buildkit.
   reproducible-image:
     name: Reproducible Image
     runs-on: ubuntu-latest
@@ -84,9 +87,16 @@ jobs:
         with:
           persist-credentials: false
 
+      # Two pins, and publish-image.yml has to carry both unchanged: `version`
+      # pins the buildx CLI, `image` pins buildkit, and the action SHA pins
+      # neither.
       - name: Set Up Buildx
         id: buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          version: v0.36.1
+          driver-opts: |
+            image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
 
       # The same value publish-image.yml derives, for the same reason.
       - name: Resolve SOURCE_DATE_EPOCH
