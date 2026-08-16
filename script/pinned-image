@@ -20,6 +20,12 @@ set -e
 #
 # script/pinned-image [<ref>]
 
+# Run from the repository root whatever the caller's directory is: `git show`
+# resolves its path against the root, and `git log` needs to be inside the repo
+# at all.
+here=$(cd "$(dirname "$0")" && pwd)
+cd "$(git -C "$here" rev-parse --show-toplevel)"
+
 ref="${1:-HEAD}"
 
 image=$(git show "${ref}:action.yml" |

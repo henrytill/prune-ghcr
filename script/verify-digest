@@ -38,6 +38,12 @@ if [[ -z $base ]]; then
 	exit 2
 fi
 
+# Run from the repository root whatever the caller's directory is, so that the
+# sibling scripts and the paths below resolve. The point of these being scripts
+# is that they can be run by hand, and by hand is rarely from the root.
+here=$(cd "$(dirname "$0")" && pwd)
+cd "$(git -C "$here" rev-parse --show-toplevel)"
+
 # publish-image.yml is on this list because the buildx and buildkit pins live
 # there, and they decide the bytes a build produces as much as the Dockerfile
 # does. A pin bumped between publishing and merging would otherwise fail

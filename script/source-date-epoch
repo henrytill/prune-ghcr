@@ -20,6 +20,12 @@ set -e
 #
 # script/source-date-epoch [<ref>]
 
+# Run from the repository root whatever the caller's directory is: `git show`
+# resolves its path against the root, and `git log` needs to be inside the repo
+# at all.
+here=$(cd "$(dirname "$0")" && pwd)
+cd "$(git -C "$here" rev-parse --show-toplevel)"
+
 ref="${1:-HEAD}"
 
 epoch=$(git log -1 --pretty=%ct "$ref")
