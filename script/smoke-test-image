@@ -34,8 +34,10 @@ fi
 
 # Owner and package are set to something harmless: the token is checked first,
 # so a failure here is unambiguously about the token and not about a missing
-# input further down. GITHUB_OUTPUT has to be somewhere writable - the action
-# treats it being unset as an error of its own.
+# input further down. GITHUB_OUTPUT is not reached on this path at all - the
+# token check returns before any output is written - and is set anyway, so that
+# pointing this at a case that gets further does not fail on the environment the
+# runner would have provided.
 output=$(docker run --rm \
 	-e INPUT_TOKEN='' \
 	-e "INPUT_DRY-RUN=true" \
