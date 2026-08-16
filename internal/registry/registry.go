@@ -1,6 +1,13 @@
 // Package registry reads image manifests from a container registry, which is
 // how the action learns which untagged versions a tagged index still
 // references.
+//
+// It goes through go-containerregistry rather than net/http for one reason
+// above the others: remote.Get negotiates manifest media types itself, so there
+// is no hand-maintained Accept list, and it verifies that the content hashes to
+// the digest requested. A hand-rolled client did not, and a manifest that does
+// not hash to what was asked for is exactly the input this action must not act
+// on.
 package registry
 
 import (

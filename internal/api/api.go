@@ -1,6 +1,12 @@
 // Package api is a client for the parts of the GitHub packages REST API the
 // action uses: identifying the token's owner, listing a package's versions, and
 // deleting one.
+//
+// It goes through go-github rather than net/http, which costs a dependency and
+// buys three things that were got wrong by hand before: pagination, parsing
+// updated_at, and knowing that api.github.com must not have /api/v3/ appended
+// while a GHES URL must. The user-versus-organization split becomes a choice of
+// method rather than a hand-built path.
 package api
 
 import (
