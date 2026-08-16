@@ -115,10 +115,23 @@ report a mismatch while CI stayed green.
 ### Reproducing a published image
 
 The label is a build input, so it has to be the **original** commit, not the
-checkout's:
+checkout's — and by the **publish, merge, then tag** ordering above, that is not
+the release tag. The digest `action.yml` pins at `vX` was built one commit
+before the one that repointed `action.yml`, so `git checkout vX` fails to
+reproduce for reasons that look exactly like nondeterminism.
+
+Read the commit off the image instead:
 
 ```bash
-git checkout <the commit being reproduced>
+docker buildx imagetools inspect ghcr.io/henrytill/prune-ghcr@<the digest> \
+  --format '{{json .Image}}' |
+  jq -r 'first(.. | objects | .["org.opencontainers.image.revision"]? // empty)'
+```
+
+Then build that commit:
+
+```bash
+git checkout <that revision>
 rev=$(git rev-parse HEAD)
 
 # The default docker driver cannot build more than one platform at a time, and
