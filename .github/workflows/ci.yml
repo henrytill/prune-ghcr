@@ -235,11 +235,15 @@ jobs:
         with:
           persist-credentials: false
 
-      # `uses: ./` reads action.yml, which names an image by digest, so this
-      # runs the published image and not this branch: "local" describes where
-      # the action definition comes from. Worth keeping for what it does prove -
-      # that the pinned digest resolves, is public, and starts - but the code
-      # under review is tested below.
+      # `uses: ./` reads action.yml, which names an image by digest, so this runs
+      # the published image and not this branch: "local" describes where the
+      # action definition comes from. What it proves is the wiring - that
+      # action.yml is a definition the runner can load and hand inputs to, which
+      # is a way every consumer would break at once.
+      #
+      # It cannot prove more than that. The assertion below is on the step's
+      # outcome, and a step that failed because the digest was deleted, made
+      # private, or never published failed just the same.
       - name: Run the image action.yml pins
         id: pinned-image
         continue-on-error: true
@@ -248,7 +252,7 @@ jobs:
           token: ''
           dry-run: 'true'
 
-      - name: Check the pinned image failed cleanly
+      - name: Check the action definition is usable
         id: output
         env:
           OUTCOME: ${{ steps.pinned-image.outcome }}
@@ -257,6 +261,14 @@ jobs:
             echo "::error::expected the pinned image to fail on an empty token"
             exit 1
           fi
+
+      # The claim the step above cannot make: the pinned digest is pullable and
+      # the image behind it behaves. This one reads the error message, so a
+      # digest that has been deleted or made private fails here rather than
+      # passing as a clean rejection.
+      - name: Check the pinned image is pullable and rejects an empty token
+        id: pinned-smoke
+        run: script/smoke-test-image "$(script/pinned-image HEAD)"
 
       # This branch, which is what nothing above tests. One platform and
       # straight into the local docker: a throwaway to execute rather than an
