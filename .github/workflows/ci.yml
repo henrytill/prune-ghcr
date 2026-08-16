@@ -235,22 +235,41 @@ jobs:
         with:
           persist-credentials: false
 
-      # The token is deliberately empty: this only proves the bundled action
-      # loads and reports a misconfiguration instead of crashing.
-      - name: Test Local Action
-        id: test-action
+      # `uses: ./` reads action.yml, which names an image by digest, so this
+      # runs the published image and not this branch: "local" describes where
+      # the action definition comes from. Worth keeping for what it does prove -
+      # that the pinned digest resolves, is public, and starts - but the code
+      # under review is tested below.
+      - name: Run the image action.yml pins
+        id: pinned-image
         continue-on-error: true
         uses: ./
         with:
           token: ''
           dry-run: 'true'
 
-      - name: Check the action failed cleanly
+      - name: Check the pinned image failed cleanly
         id: output
         env:
-          OUTCOME: ${{ steps.test-action.outcome }}
+          OUTCOME: ${{ steps.pinned-image.outcome }}
         run: |
           if [ "$OUTCOME" != "failure" ]; then
-            echo "::error::expected the action to fail on an empty token"
+            echo "::error::expected the pinned image to fail on an empty token"
             exit 1
           fi
+
+      # This branch, which is what nothing above tests. One platform and
+      # straight into the local docker: a throwaway to execute rather than an
+      # artifact to compare, so none of the flags that make a digest reproducible
+      # apply and it does not go through .github/actions/build-image.
+      - name: Build this branch's image
+        id: build
+        run: docker build -t prune-ghcr:ci .
+
+      # The invariant is that an empty token is a misconfiguration and not an
+      # opt-out, since the alternative is a green run that quietly stopped
+      # pruning. Asserted against the code being merged rather than against
+      # whatever was published last.
+      - name: Check it rejects an empty token
+        id: smoke
+        run: script/smoke-test-image prune-ghcr:ci
