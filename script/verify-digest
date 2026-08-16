@@ -1,0 +1,81 @@
+#!/bin/bash
+
+# Exit early
+# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
+set -e
+
+# About:
+#
+# Decides whether the digest action.yml pins needs verifying against a base
+# commit, and works out what rebuilding it would take. Prints key=value lines:
+#
+#   changed=false                       the pinned image is unchanged; stop here
+#
+#   changed=true
+#   IMAGE=ghcr.io/owner/name@sha256:... the pinned image
+#   DIGEST=sha256:...                   its digest, for the comparison
+#   REV=<commit>                        the commit it claims to be built from
+#   SOURCE_DATE_EPOCH=<seconds>         that commit's date
+#
+# This does not rebuild, because the rebuild runs through buildx rather than
+# through a shell. The caller rebuilds with REV as the revision label and that
+# SOURCE_DATE_EPOCH, then compares with script/assert-digest.
+#
+# The revision is read off the image rather than guessed - the image is built
+# from the commit *before* the one that pins it, so a rebuild at HEAD's own SHA
+# could never match. What stops that revision from being a claim the image makes
+# about itself with nothing behind it is the diff below: identical build inputs
+# mean the image at REV is an image of the source being merged.
+#
+# Usage:
+#
+# script/verify-digest <base-ref>
+
+base="$1"
+
+if [[ -z $base ]]; then
+	echo "usage: script/verify-digest <base-ref>" >&2
+	exit 2
+fi
+
+# publish-image.yml is on this list because the buildx and buildkit pins live
+# there, and they decide the bytes a build produces as much as the Dockerfile
+# does. A pin bumped between publishing and merging would otherwise fail
+# verification on an image that reproduces perfectly.
+build_inputs=(
+	cmd
+	internal
+	go.mod
+	go.sum
+	Dockerfile
+	.github/workflows/publish-image.yml
+)
+
+head_image=$(script/pinned-image HEAD)
+base_image=$(script/pinned-image "$base")
+
+if [[ $head_image == "$base_image" ]]; then
+	echo "changed=false"
+	exit 0
+fi
+
+digest="${head_image#*@}"
+
+revision=$(script/image-revision "$head_image")
+
+if ! git cat-file -e "${revision}^{commit}" 2>/dev/null; then
+	echo "${head_image} claims commit ${revision}, which is not in this repository" >&2
+	exit 1
+fi
+
+if ! git diff --quiet "$revision" HEAD -- "${build_inputs[@]}"; then
+	echo "build inputs differ between ${revision} and HEAD:" >&2
+	git diff --stat "$revision" HEAD -- "${build_inputs[@]}" >&2
+	exit 1
+fi
+
+echo "changed=true"
+echo "IMAGE=${head_image}"
+echo "DIGEST=${digest}"
+echo "REV=${revision}"
+echo "SOURCE_DATE_EPOCH=$(script/source-date-epoch "$revision")"

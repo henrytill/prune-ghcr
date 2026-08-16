@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# Exit early
+# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
+set -e
+
+# About:
+#
+# Prints the image reference action.yml pins, at a given commit.
+#
+# That reference is what a consumer pinning this action by SHA actually runs, so
+# reading it back out is where verifying it starts. It is printed whole, digest
+# included, so that callers do not have to reassemble a registry path.
+#
+# An action.yml that no longer matches the shape this reads is a failure rather
+# than an empty result: callers compare the output against another commit's, and
+# two empty strings compare equal.
+#
+# Usage:
+#
+# script/pinned-image [<ref>]
+
+ref="${1:-HEAD}"
+
+image=$(git show "${ref}:action.yml" |
+	sed -nE 's|^  image: docker://(.+@sha256:[0-9a-f]{64})$|\1|p')
+
+if [[ -z $image ]]; then
+	echo "action.yml at ${ref} does not pin an image by digest" >&2
+	exit 1
+fi
+
+echo "$image"

@@ -120,12 +120,10 @@ the release tag. The digest `action.yml` pins at `vX` was built one commit
 before the one that repointed `action.yml`, so `git checkout vX` fails to
 reproduce for reasons that look exactly like nondeterminism.
 
-Read the commit off the image instead:
+Read the commit off the image instead, which is what the revision label is for:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/henrytill/prune-ghcr@<the digest> \
-  --format '{{json .Image}}' |
-  jq -r 'first(.. | objects | .["org.opencontainers.image.revision"]? // empty)'
+script/image-revision ghcr.io/henrytill/prune-ghcr@<the digest>
 ```
 
 Then build that commit:
@@ -167,7 +165,9 @@ break reproducibility silently and only surface at release time.
 
 Reproducibility is also what lets the ordering be verified rather than followed
 correctly. `verify-digest.yml` runs on every pull request and, when the digest
-line in `action.yml` differs from the base branch, does this:
+line in `action.yml` differs from the base branch, does this — the steps other
+than the rebuild live in `script/verify-digest` and `script/assert-digest`, so
+they can be run by hand:
 
 1. Reads the pinned digest `D` out of `action.yml`.
 1. Reads `org.opencontainers.image.revision` back off the image at `D` — call it

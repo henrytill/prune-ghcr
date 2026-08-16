@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# Exit early
+# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
+set -e
+
+# About:
+#
+# Compares the digest of an OCI layout against the digest it is expected to
+# have, and fails if they differ.
+#
+# Anything that is not a digest fails too. `jq` prints an empty string for an
+# index that carries no digest where this reads for one, and a comparison of
+# nothing against nothing passes - which is how a check quietly stops checking.
+#
+# Usage:
+#
+# script/assert-digest <expected-digest> <oci-layout-dir>
+
+expected="$1"
+layout="$2"
+
+if [[ -z $expected || -z $layout ]]; then
+	echo "usage: script/assert-digest <expected-digest> <oci-layout-dir>" >&2
+	exit 2
+fi
+
+built=$(jq -r '.manifests[0].digest // ""' "${layout}/index.json")
+
+for digest in "$expected" "$built"; do
+	case $digest in
+	sha256:[0-9a-f]*) ;;
+	*)
+		echo "not a digest: '${digest}'" >&2
+		exit 1
+		;;
+	esac
+done
+
+if [[ $built != "$expected" ]]; then
+	echo "expected ${expected}, built ${built}" >&2
+	exit 1
+fi
+
+echo "$built"
