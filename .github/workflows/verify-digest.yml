@@ -41,15 +41,25 @@ jobs:
           # its commit date need it present.
           fetch-depth: 0
 
+      # Read rather than restated. buildx and buildkit decide the bytes a build
+      # produces, so a rebuild has to use what publishing used; a third hardcoded
+      # copy of the pins is a copy that can be missed by a bump, and the rebuild
+      # would then report the mismatch as if the build were nondeterministic.
+      # script/verify-digest's build-input diff covers publish-image.yml, so its
+      # pins at HEAD are the pins the image was built with.
+      - name: Read the builder pins publishing uses
+        id: pins
+        run: script/builder-pins >>"$GITHUB_OUTPUT"
+
       # buildx before the plan, which reads the revision label off the image.
       - name: Set Up Buildx
         id: buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
         with:
-          version: v0.36.1
+          version: ${{ steps.pins.outputs.BUILDX_VERSION }}
           cache-binary: false
           driver-opts: |
-            image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+            image=${{ steps.pins.outputs.BUILDKIT_IMAGE }}
 
       # `changed` gates the rest; the other values are what the rebuild needs.
       # pipefail matters here: without it the exit status is tee's, and a failed
