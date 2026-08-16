@@ -88,7 +88,13 @@ jobs:
         id: compare
         if: steps.plan.outputs.changed == 'true'
         run: |
-          script/assert-digest "$DIGEST" "$(script/layout-digest /tmp/image)"
+          # Assigned first: a command substitution used as an argument discards
+          # its own exit status, which is the shape ci.yml and publish-image.yml
+          # both avoid. assert-digest would reject the empty string that a failed
+          # layout-digest leaves, so this one is safe either way - but a rule
+          # with an exception in it is a rule nobody applies.
+          built=$(script/layout-digest /tmp/image)
+          script/assert-digest "$DIGEST" "$built"
           {
             echo "### Pinned digest verified"
             echo
