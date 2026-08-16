@@ -102,11 +102,17 @@ jobs:
         with:
           persist-credentials: false
 
-      # Three pins, and publish-image.yml has to carry the first two unchanged:
-      # `version` pins the buildx CLI, `image` pins buildkit, and the action SHA
-      # pins neither. `network=host` and the inline config are what let the
-      # builder reach the registry service over plain HTTP, and neither one
-      # affects the bytes a build produces.
+      # From publish-image.yml, because this job exists to reproduce what that
+      # workflow produces, and buildx and buildkit decide the bytes as much as
+      # the Dockerfile does. Restating them here made a second copy that a bump
+      # could miss, which would show up as this job disagreeing with a publish.
+      - name: Read the builder pins publishing uses
+        id: pins
+        run: script/builder-pins >>"$GITHUB_OUTPUT"
+
+      # `network=host` and the inline config are what let the builder reach the
+      # registry service over plain HTTP; neither affects the bytes a build
+      # produces.
       #
       # `cache-binary: false` because the point of pinning a version is to know
       # which binary runs. The cache this action writes is a per-repository one
@@ -117,10 +123,10 @@ jobs:
         id: buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
         with:
-          version: v0.36.1
+          version: ${{ steps.pins.outputs.BUILDX_VERSION }}
           cache-binary: false
           driver-opts: |
-            image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+            image=${{ steps.pins.outputs.BUILDKIT_IMAGE }}
             network=host
           buildkitd-config-inline: |
             [registry."localhost:5000"]
@@ -132,16 +138,14 @@ jobs:
       # below is its SHA. What the three builds here have to agree on is each
       # other, and they do; the value a release will use is whatever the merged
       # commit carries.
+      # Assigned first, not interpolated straight into the echo: a failing
+      # command substitution inside `echo "..."` leaves echo's own status, so
+      # that form would write an empty value and carry on, which is the failure
+      # the script exists to prevent.
       - name: Resolve SOURCE_DATE_EPOCH
         id: epoch
         run: |
-          epoch=$(git log -1 --pretty=%ct)
-          case "$epoch" in
-            '' | *[!0-9]*)
-              echo "::error::no commit date for SOURCE_DATE_EPOCH: '${epoch}'"
-              exit 1
-              ;;
-          esac
+          epoch=$(script/source-date-epoch)
           echo "SOURCE_DATE_EPOCH=${epoch}" >>"$GITHUB_ENV"
 
       # An OCI layout rather than a registry push, which keeps the pair of
@@ -193,41 +197,31 @@ jobs:
           labels: org.opencontainers.image.revision=${{ github.sha }}
           provenance: false
 
-      - name: Compare digests
+      # Two comparisons rather than one, because they mean different things and
+      # the step that fails is what says which: the first two builds differing
+      # is nondeterminism, and the pushed build differing is the two exporters
+      # disagreeing. script/assert-digest reports the values, not the meaning.
+      - name: Check the build is reproducible
         id: compare
+        run: |
+          a=$(script/layout-digest /tmp/image-a)
+          b=$(script/layout-digest /tmp/image-b)
+
+          # Assigned rather than interpolated into the echo, for the reason
+          # given on the epoch step above.
+          digest=$(script/assert-digest "$a" "$b")
+          echo "both builds: ${digest}"
+          echo "DIGEST=${digest}" >>"$GITHUB_ENV"
+
+      - name: Check the exporters agree
+        id: parity-compare
         env:
           PUSHED: ${{ steps.parity.outputs.digest }}
         run: |
-          a=$(jq -r '.manifests[0].digest // ""' /tmp/image-a/index.json)
-          b=$(jq -r '.manifests[0].digest // ""' /tmp/image-b/index.json)
-
-          echo "first build:  $a"
-          echo "second build: $b"
-          echo "pushed build: $PUSHED"
-
-          # Without this, an index that stops carrying a digest where these read
-          # for one leaves all three empty, and a guard that compares nothing
-          # against nothing passes. The length is part of that: `sha256:[0-9a-f]*`
-          # would accept a bare `sha256:`, and two of those compare equal too.
-          for d in "$a" "$b" "$PUSHED"; do
-            if [[ ! $d =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "::error::not a digest: '${d}'"
-              exit 1
-            fi
-          done
-
-          if [ "$a" != "$b" ]; then
-            echo "::error::the image is not reproducible: $a != $b"
-            exit 1
-          fi
-
-          if [ "$a" != "$PUSHED" ]; then
-            echo "::error::the exporters disagree: $a != $PUSHED"
-            exit 1
-          fi
+          script/assert-digest "$DIGEST" "$PUSHED"
 
           echo "### Reproducible image" >>"$GITHUB_STEP_SUMMARY"
-          echo "Built three times, all \`$a\`." >>"$GITHUB_STEP_SUMMARY"
+          echo "Built three times, all \`${DIGEST}\`." >>"$GITHUB_STEP_SUMMARY"
 
   # An end-to-end run needs a PAT and a real package, neither of which a fork's
   # pull request has; see the dry-run workflow for that.
