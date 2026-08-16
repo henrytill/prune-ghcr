@@ -76,13 +76,10 @@ jobs:
       - name: Rebuild
         id: rebuild
         if: steps.plan.outputs.changed == 'true'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: ./.github/actions/build-image
         with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          outputs: type=oci,dest=/tmp/image,tar=false,rewrite-timestamp=true,oci-mediatypes=true
-          labels: org.opencontainers.image.revision=${{ env.REV }}
-          provenance: false
+          output: type=oci,dest=/tmp/image,tar=false
+          revision: ${{ env.REV }}
 
       - name: Compare with the pinned digest
         id: compare
