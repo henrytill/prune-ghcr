@@ -81,10 +81,23 @@ What gets it there:
 - `provenance: false`, since an attestation records the time it was made
 - `SOURCE_DATE_EPOCH`, taken from the commit date — the one clock a third party
   rebuilding that commit also has
-- buildx's `rewrite-timestamp`, which is why `publish-image.yml` passes
-  `outputs: type=image,push=true,...` rather than `push: true`
+- buildx's `rewrite-timestamp`, which is why every build passes an `output`
+  rather than `push: true` — the latter is the same registry export with no
+  attribute to attach this to
 - `oci-mediatypes=true` on every export, so that a digest does not depend on
   which exporter produced it
+
+Those last four are the same at every build, because they have to be: a
+comparison between two builds that passed different ones is not a comparison of
+anything. They are declared once, in `.github/actions/build-image`, which every
+build goes through — publishing, the two determinism builds, the parity build
+and the rebuild that verifies a pinned digest. Callers pass only where the
+result goes, the revision to label, and whether the cache may answer.
+
+That is also why the revision is checked there rather than defaulted to the
+checkout's SHA: `verify-digest.yml` rebuilds an image built at an earlier commit
+and must pass _that_ one, so a default would be right four times and silently
+wrong on the one build whose job is to catch exactly this class of mistake.
 
 The pins are what make the promise hold for someone else. Everything a build
 resolves by tag is a version two CI builds seconds apart necessarily agree on
@@ -108,11 +121,11 @@ that. In practice the pushed images have been OCI indices regardless — `v2.0.0
 published before any of this, is one. Naming it on both exporters means the
 parity rests on neither the documented default nor the observed one.
 
-Naming it is still only an intention, so CI checks it: the third build in
-`reproducible-image` pushes through the `type=image` exporter to a throwaway
-registry service and compares that digest with the `type=oci` one. Without it,
-the exporters could diverge in any byte and every outside reproduction would
-report a mismatch while CI stayed green.
+Declaring it in one place is still only an intention, so CI checks it: the third
+build in `reproducible-image` pushes through the `type=image` exporter to a
+throwaway registry service and compares that digest with the `type=oci` one.
+Without it, the exporters could diverge in any byte and every outside
+reproduction would report a mismatch while CI stayed green.
 
 ### Reproducing a published image
 
@@ -180,9 +193,10 @@ they can be run by hand:
 1. Reads `org.opencontainers.image.revision` back off the image at `D` — call it
    `R`, the commit the image claims to be built from.
 1. `git diff --quiet R HEAD` over the build inputs: `cmd`, `internal`, `go.mod`,
-   `go.sum`, the `Dockerfile`, and `publish-image.yml`, where the buildx and
-   buildkit pins live. Empty means the image at `R` is an image of the source
-   being merged, which is the stale-digest failure caught directly.
+   `go.sum`, the `Dockerfile`, `publish-image.yml`, where the buildx and
+   buildkit pins live, and the `build-image` action, which holds the rest of the
+   flags a digest is over. Empty means the image at `R` is an image of the
+   source being merged, which is the stale-digest failure caught directly.
 1. Rebuilds at this checkout, with `SOURCE_DATE_EPOCH` from `R`'s commit date
    and the revision label set to `R`.
 1. Fails unless the rebuilt digest equals `D`.

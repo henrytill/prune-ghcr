@@ -49,10 +49,12 @@ fi
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$(git -C "$here" rev-parse --show-toplevel)"
 
-# publish-image.yml is on this list because the buildx and buildkit pins live
-# there, and they decide the bytes a build produces as much as the Dockerfile
-# does. A pin bumped between publishing and merging would otherwise fail
-# verification on an image that reproduces perfectly.
+# The last two are here because they decide the bytes a build produces as much
+# as the Dockerfile does: publish-image.yml holds the buildx and buildkit pins,
+# and the build-image action holds the platforms, the timestamp rewriting, the
+# media types and the build-push-action version. Either one changed between
+# publishing and merging would otherwise fail verification on an image that
+# reproduces perfectly.
 build_inputs=(
 	cmd
 	internal
@@ -60,6 +62,7 @@ build_inputs=(
 	go.sum
 	Dockerfile
 	.github/workflows/publish-image.yml
+	.github/actions/build-image/action.yml
 )
 
 # Under Actions these land where the workflow needs them; by hand they are just
