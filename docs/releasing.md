@@ -68,7 +68,9 @@ and confirm the published image matches the source, which is the real prize.
 What gets it there:
 
 - `-trimpath` and `CGO_ENABLED=0`, so the Go binary does not embed build paths
-- a pinned toolchain and a base image pinned by digest
+- the builder and the runtime base both pinned by digest, not only by tag —
+  Docker Hub re-pushes a tag like `golang:1.26.6-trixie` on security updates, so
+  the tag names different bytes on different days
 - the Dockerfile frontend pinned by digest, since `# syntax=docker/dockerfile:1`
   resolves to whatever is newest and the frontend decides how layers and the
   image config are produced
