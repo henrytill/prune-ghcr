@@ -196,29 +196,51 @@ directly. `buildctl` ships inside the buildkit image, so nothing else has to be
 installed:
 
 ```bash
-mkdir -p out
+# Both are set by the block above; restated because this section is its own
+# anchor. An empty revision or epoch is what the build-image action refuses to
+# build with, and buildctl has no such guard.
+image=ghcr.io/henrytill/prune-ghcr@<the digest being reproduced>
+rev=<that revision>
+epoch=$(script/source-date-epoch "$rev")
 
+# Cleared, not just created: buildctl failing would otherwise leave the previous
+# run's layout in place for the comparison below to pass on.
+rm -rf out && mkdir -p out
+
+# The buildkit pin publish-image.yml names -- read it with script/builder-pins at
+# the commit being reproduced rather than trusting the one written here.
 podman run -d --name bk --privileged \
   -v "$PWD":/src:ro -v "$PWD/out":/out \
   docker.io/moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+
+# buildkitd needs a moment to create its socket, and `podman exec` does not wait.
+until podman exec bk buildctl debug workers >/dev/null 2>&1; do sleep 0.5; done
 
 podman exec bk buildctl build \
   --frontend dockerfile.v0 \
   --local context=/src --local dockerfile=/src \
   --opt platform=linux/amd64,linux/arm64 \
-  --opt build-arg:SOURCE_DATE_EPOCH="$(script/source-date-epoch "$rev")" \
+  --opt build-arg:SOURCE_DATE_EPOCH="$epoch" \
   --opt label:org.opencontainers.image.revision="$rev" \
   --output type=oci,dest=/out/image,tar=false,rewrite-timestamp=true,oci-mediatypes=true
 
-script/assert-digest "${image#*@}" "$(script/layout-digest ./out/image)"
-
+# Before the comparison, so that a mismatch leaves nothing to clean up by hand:
+# the container is not needed to read the result, and a retry would otherwise
+# fail on the name being in use.
 podman rm -f bk
+
+script/assert-digest "${image#*@}" "$(script/layout-digest ./out/image)"
 ```
 
-The buildkit pin is the one `publish-image.yml` names, read with
-`script/builder-pins` at the commit being reproduced. `SOURCE_DATE_EPOCH` is a
-build argument here rather than an environment variable, and provenance needs no
-flag, because `buildctl` does not add an attestation the way buildx does.
+`SOURCE_DATE_EPOCH` is a build argument here rather than an environment
+variable, and provenance needs no flag, because `buildctl` does not add an
+attestation the way buildx does.
+
+This was run under rootless podman on Debian with nothing but `--privileged`. A
+host that confines containers more tightly may want `--device /dev/fuse` and
+relaxed seccomp and apparmor, and an SELinux host needs `:z` on both bind mounts
+or the context is unreadable. None of that changes the bytes; it only decides
+whether the build starts.
 
 This was run against `v2.0.1` and reached the digest `action.yml` pins, which is
 worth more than the equivalence looks: buildx and `buildctl` are different
