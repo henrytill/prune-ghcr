@@ -14,6 +14,18 @@ set -e
 # *before* the one that pins it. See "Reproducing a published image" in
 # docs/releasing.md.
 #
+# Asked of the registry directly, with curl and jq, rather than through a
+# container runtime. `docker buildx imagetools` would do it in one command, but
+# this is the first step of reproducing a release and a reader may have podman
+# and no Docker - and podman's `docker` shim answers `buildx version` without
+# implementing `imagetools`, so probing for it does not even fail honestly.
+# Pulling the image to read one string off it works and costs tens of megabytes.
+#
+# The registry is asked for a token the way it asks to be asked: an
+# unauthenticated request comes back with a Bearer challenge naming the realm
+# and service. That covers public images, which this action's must be anyway -
+# a Docker action cannot authenticate a private pull.
+#
 # The label lives in each platform's image config rather than in the index, so
 # this reads whichever one it finds first. They are built from one commit and
 # have never disagreed; if they ever did, the rebuild would fail loudly rather
@@ -32,8 +44,72 @@ if [[ -z $image ]]; then
 	exit 2
 fi
 
-revision=$(docker buildx imagetools inspect "$image" --format '{{json .Image}}' |
-	jq -r 'first(.. | objects | .["org.opencontainers.image.revision"]? // empty)')
+if [[ $image == *@* ]]; then
+	name="${image%@*}"
+	reference="${image#*@}"
+elif [[ ${image##*/} == *:* ]]; then
+	name="${image%:*}"
+	reference="${image##*:}"
+else
+	echo "no tag or digest in ${image}" >&2
+	exit 2
+fi
+
+host="${name%%/*}"
+repository="${name#*/}"
+
+# docker.io is the name people write and not the one that serves the API.
+if [[ $host == docker.io ]]; then
+	host=registry-1.docker.io
+fi
+
+accept='application/vnd.oci.image.index.v1+json'
+accept+=',application/vnd.docker.distribution.manifest.list.v2+json'
+accept+=',application/vnd.oci.image.manifest.v1+json'
+accept+=',application/vnd.docker.distribution.manifest.v2+json'
+
+challenge=$(curl -sI -H "Accept: ${accept}" \
+	"https://${host}/v2/${repository}/manifests/${reference}" |
+	tr -d '\r' | sed -nE 's/^[Ww][Ww][Ww]-[Aa]uthenticate: Bearer (.*)$/\1/p')
+
+auth=()
+if [[ -n $challenge ]]; then
+	realm=$(sed -nE 's/.*realm="([^"]+)".*/\1/p' <<<"$challenge")
+	service=$(sed -nE 's/.*service="([^"]+)".*/\1/p' <<<"$challenge")
+	token=$(curl -s "${realm}?service=${service}&scope=repository:${repository}:pull" |
+		jq -r '.token // .access_token // empty')
+	if [[ -n $token ]]; then
+		auth=(-H "Authorization: Bearer ${token}")
+	fi
+fi
+
+registry_get() {
+	curl -sL --fail "${auth[@]}" -H "Accept: ${accept}" "https://${host}/v2/${repository}/$1"
+}
+
+if ! document=$(registry_get "manifests/${reference}"); then
+	echo "cannot read ${image} from ${host}" >&2
+	exit 1
+fi
+
+# An index names per-platform manifests; a manifest names a config directly.
+if [[ $(jq -r 'has("manifests")' <<<"$document") == true ]]; then
+	child=$(jq -r '.manifests[0].digest // empty' <<<"$document")
+	if [[ -z $child ]]; then
+		echo "${image} is an index naming no manifests" >&2
+		exit 1
+	fi
+	document=$(registry_get "manifests/${child}")
+fi
+
+config=$(jq -r '.config.digest // empty' <<<"$document")
+if [[ -z $config ]]; then
+	echo "${image} names no image config" >&2
+	exit 1
+fi
+
+revision=$(registry_get "blobs/${config}" |
+	jq -r '.config.Labels["org.opencontainers.image.revision"] // empty')
 
 if [[ -z $revision ]]; then
 	echo "${image} carries no org.opencontainers.image.revision label" >&2
