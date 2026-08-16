@@ -187,6 +187,44 @@ Reproducing someone else's build from a checkout of a different commit will not
 match, and should not: the revision label is what makes a digest auditable back
 to a commit.
 
+#### Without Docker
+
+buildx needs a Docker daemon, and podman's builder is not a substitute: the
+builder is a build input like any other, so buildah producing different bytes
+would say nothing about the image. What works is the same buildkit, run
+directly. `buildctl` ships inside the buildkit image, so nothing else has to be
+installed:
+
+```bash
+mkdir -p out
+
+podman run -d --name bk --privileged \
+  -v "$PWD":/src:ro -v "$PWD/out":/out \
+  docker.io/moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+
+podman exec bk buildctl build \
+  --frontend dockerfile.v0 \
+  --local context=/src --local dockerfile=/src \
+  --opt platform=linux/amd64,linux/arm64 \
+  --opt build-arg:SOURCE_DATE_EPOCH="$(script/source-date-epoch "$rev")" \
+  --opt label:org.opencontainers.image.revision="$rev" \
+  --output type=oci,dest=/out/image,tar=false,rewrite-timestamp=true,oci-mediatypes=true
+
+script/assert-digest "${image#*@}" "$(script/layout-digest ./out/image)"
+
+podman rm -f bk
+```
+
+The buildkit pin is the one `publish-image.yml` names, read with
+`script/builder-pins` at the commit being reproduced. `SOURCE_DATE_EPOCH` is a
+build argument here rather than an environment variable, and provenance needs no
+flag, because `buildctl` does not add an attestation the way buildx does.
+
+This was run against `v2.0.1` and reached the digest `action.yml` pins, which is
+worth more than the equivalence looks: buildx and `buildctl` are different
+clients, so it also says the pins are what the reproducibility rests on, and not
+something `build-push-action` does on the way past.
+
 ### The ordering is checked, not just followed
 
 CI builds every pull request twice — second pass with `no-cache`, or the rebuild
