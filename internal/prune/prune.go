@@ -127,10 +127,10 @@ func doomedVersions(
 		}
 
 		if version.UpdatedAt.IsZero() {
-			// An absent timestamp is unknown, not ancient. The TypeScript
-			// compared NaN here, which is false, so a version whose updated_at
-			// could not be read was deleted; skip it instead, on the same
-			// refusal to guess as the unreadable manifest above.
+			// An absent timestamp is unknown, not ancient. The zero time is
+			// older than every cutoff, so treating it as data would delete
+			// exactly the versions there is least information about; skip it,
+			// on the same refusal to guess as the unreadable manifest above.
 			log.Warning(fmt.Sprintf("skipping %s (no usable updated_at)", version.Name))
 			continue
 		}

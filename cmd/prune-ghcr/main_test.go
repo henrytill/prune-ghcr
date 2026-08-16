@@ -15,11 +15,12 @@ func TestParseMinAge(t *testing.T) {
 		{input: "1", want: time.Hour},
 		{input: "0.5", want: 30 * time.Minute},
 		{input: "1e1", want: 10 * time.Hour},
-		// Number("") is 0, and this input is green today, so it stays green.
+		// An unset expression reaches this input as an empty string, and a
+		// workflow that does so is green today.
 		{input: ""},
 		{input: "-1", wantErr: true},
 		{input: "abc", wantErr: true},
-		// ParseFloat accepts these; Number.isFinite rejected them.
+		// ParseFloat accepts these, and they are not ages.
 		{input: "NaN", wantErr: true},
 		{input: "Inf", wantErr: true},
 		{input: "-Inf", wantErr: true},
