@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# Exit early
+# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
+set -e
+
+# About:
+#
+# Prints the buildx and buildkit versions publish-image.yml pins, as key=value
+# lines:
+#
+#   BUILDX_VERSION=v0.36.1
+#   BUILDKIT_IMAGE=moby/buildkit:v0.32.2@sha256:...
+#
+# Both decide the bytes a build produces, so anything rebuilding a published
+# image has to use the same ones. Restating them is how they drift: a bump that
+# missed one copy would leave a rebuild running an older buildkit and reporting
+# the resulting mismatch as if the build were nondeterministic.
+#
+# publish-image.yml is the source of truth because it is the workflow that
+# actually publishes. It is also on the build-input list in script/verify-digest,
+# so a pull request cannot change these without the diff there noticing.
+#
+# Usage:
+#
+# script/builder-pins [<ref>]
+
+here=$(cd "$(dirname "$0")" && pwd)
+cd "$(git -C "$here" rev-parse --show-toplevel)"
+
+ref="${1:-HEAD}"
+
+workflow=$(git show "${ref}:.github/workflows/publish-image.yml")
+
+version=$(echo "$workflow" | sed -nE 's|^ *version: (v[0-9.]+) *$|\1|p' | head -1)
+image=$(echo "$workflow" |
+	sed -nE 's|^ *image=(moby/buildkit:.+@sha256:[0-9a-f]{64}) *$|\1|p' | head -1)
+
+if [[ -z $version || -z $image ]]; then
+	echo "no builder pins in publish-image.yml at ${ref}" >&2
+	exit 1
+fi
+
+echo "BUILDX_VERSION=${version}"
+echo "BUILDKIT_IMAGE=${image}"
