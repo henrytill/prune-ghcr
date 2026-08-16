@@ -87,12 +87,20 @@ What gets it there:
 - `oci-mediatypes=true` on every export, so that a digest does not depend on
   which exporter produced it
 
-Those last four are the same at every build, because they have to be: a
-comparison between two builds that passed different ones is not a comparison of
-anything. They are declared once, in `.github/actions/build-image`, which every
-build goes through — publishing, the two determinism builds, the parity build
-and the rebuild that verifies a pinned digest. Callers pass only where the
-result goes, the revision to label, and whether the cache may answer.
+All of these have to be the same at every build: a comparison between two builds
+that passed different ones is not a comparison of anything. Most of them are
+declared once, in `.github/actions/build-image`, which every build goes through
+— publishing, the two determinism builds, the parity build and the rebuild that
+verifies a pinned digest. It fixes `provenance: false`, `rewrite-timestamp`,
+`oci-mediatypes` and the platforms, which is a digest input as much as the rest,
+and it pins the version of `build-push-action` that runs. Callers pass only
+where the result goes, the revision to label, and whether the cache may answer.
+
+`SOURCE_DATE_EPOCH` is the exception, and has to be: it comes from a commit only
+the caller knows, so each one sets it with `script/source-date-epoch` before
+building. The action checks that it is set rather than trusting that, since
+`rewrite-timestamp` with no epoch rewrites nothing and produces an
+unreproducible image without failing anything.
 
 That is also why the revision is checked there rather than defaulted to the
 checkout's SHA: `verify-digest.yml` rebuilds an image built at an earlier commit
