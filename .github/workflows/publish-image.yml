@@ -37,15 +37,17 @@ jobs:
         # zizmor: ignore[artipacked]
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Both pins have to match ci.yml's, or that job verifies a build this one
-      # does not run. The action SHA pins the action alone: without `version`
+      # These two pins live here, and here only. ci.yml and verify-digest.yml
+      # read them out of this file with script/builder-pins, because both exist
+      # to reproduce what this workflow publishes -- so bump them here and the
+      # rest follows. The action SHA pins the action alone: without `version`
       # this installs the newest buildx release, and without `image` the builder
       # runs whatever `moby/buildkit:buildx-stable-1` points at that day.
       #
       # `cache-binary: false` for the same reason as the pins: the cache this
       # action writes is a per-repository one a pull request can populate, so
       # restoring the buildx binary from it would undo the `version` pin in the
-      # workflow that publishes. See ci.yml.
+      # workflow that publishes.
       - name: Set Up Buildx
         id: buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
