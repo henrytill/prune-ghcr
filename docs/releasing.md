@@ -196,11 +196,16 @@ directly. `buildctl` ships inside the buildkit image, so nothing else has to be
 installed:
 
 ```bash
-# Both are set by the block above; restated because this section is its own
-# anchor. An empty revision or epoch is what the build-image action refuses to
-# build with, and buildctl has no such guard.
+# The whole of the section above, restated: this one is its own anchor, and a
+# reader who arrives here needs the revision as much as anyone. It is the commit
+# the image was built from, which is not the release tag's - read it off the
+# image rather than guessing, and check it out before building.
+#
+# script/image-revision asks the registry with curl and jq, so it needs no
+# container runtime at all - which is the point, here of all places.
 image=ghcr.io/henrytill/prune-ghcr@<the digest being reproduced>
-rev=<that revision>
+rev=$(script/image-revision "$image")
+git checkout "$rev"
 epoch=$(script/source-date-epoch "$rev")
 
 # Cleared, not just created: buildctl failing would otherwise leave the previous
