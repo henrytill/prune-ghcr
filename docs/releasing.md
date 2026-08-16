@@ -125,7 +125,8 @@ reproduce for reasons that look exactly like nondeterminism.
 Read the commit off the image instead, which is what the revision label is for:
 
 ```bash
-script/image-revision ghcr.io/henrytill/prune-ghcr@<the digest>
+image=ghcr.io/henrytill/prune-ghcr@<the digest being reproduced>
+script/image-revision "$image"
 ```
 
 Then build that commit:
@@ -147,7 +148,11 @@ SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct "$rev") \
     --provenance=false \
     --output type=oci,dest=./image,tar=false,rewrite-timestamp=true,oci-mediatypes=true
 
-jq -r '.manifests[0].digest' image/index.json   # compare with action.yml
+# Against the digest you started from, not against action.yml: at this commit
+# action.yml still pins the previous image, which is the whole point of the
+# ordering. These are the same scripts verify-digest.yml runs.
+built=$(script/layout-digest ./image)
+script/assert-digest "${image#*@}" "$built"
 ```
 
 `--provenance=false`, with the equals sign: the flag takes an optional value, so
