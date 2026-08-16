@@ -106,6 +106,12 @@ that. In practice the pushed images have been OCI indices regardless — `v2.0.0
 published before any of this, is one. Naming it on both exporters means the
 parity rests on neither the documented default nor the observed one.
 
+Naming it is still only an intention, so CI checks it: the third build in
+`reproducible-image` pushes through the `type=image` exporter to a throwaway
+registry service and compares that digest with the `type=oci` one. Without it,
+the exporters could diverge in any byte and every outside reproduction would
+report a mismatch while CI stayed green.
+
 ### Reproducing a published image
 
 The label is a build input, so it has to be the **original** commit, not the
@@ -141,10 +147,10 @@ to a commit.
 ### The ordering rule stays
 
 CI builds every pull request twice — second pass with `no-cache`, or the rebuild
-replays the first one's layers and compares a result against itself — and fails
-if the digests differ. That is what keeps this honest: a single new source of
-nondeterminism would otherwise break reproducibility silently and only surface
-at release time.
+replays the first one's layers and compares a result against itself — plus a
+third time through the pushing exporter, and fails if the digests differ. That
+is what keeps this honest: a single new source of nondeterminism would otherwise
+break reproducibility silently and only surface at release time.
 
 But the release still does not verify itself. Reproducibility could in principle
 dissolve the ordering constraint rather than manage it, by having a release tag
