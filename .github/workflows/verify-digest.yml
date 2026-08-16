@@ -1,0 +1,195 @@
+name: Verify Digest
+
+# Checks that the digest action.yml pins reproduces from the source it is being
+# merged into. See docs/releasing.md and #37.
+#
+# Releasing has a required sequence - publish, merge the digest commit, tag -
+# because action.yml has to name a digest that already exists. Nothing enforced
+# it: script/release checks after the fact that the pinned digest carries the
+# tag, which catches a stale digest only once the release is being cut.
+#
+# The check belongs on the merge rather than the tag. The main ruleset has
+# required status checks, so a merge can be gated; the release tag ruleset has
+# only `deletion`, so a tag cannot be gated - and since tag deletion is blocked,
+# a tag that failed verification could not even be withdrawn. By the time the
+# tag exists, this has already been true for one commit.
+#
+# It runs on every pull request and passes immediately when the pinned digest is
+# unchanged. It must not filter on `paths: action.yml`: a required check that is
+# filtered out never reports at all, which blocks every other pull request
+# forever rather than passing them.
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify Pinned Digest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # R is an arbitrary distance back, and both the diff and its commit
+          # date need it present.
+          fetch-depth: 0
+
+      # An empty result here means action.yml stopped matching the shape this
+      # reads, not that the digest is unchanged, so it fails rather than
+      # silently passing every pull request from then on.
+      - name: Has the pinned digest changed?
+        id: changed
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          digest_at() {
+            git show "$1:action.yml" |
+              sed -nE 's|^  image: docker://[^@]+@(sha256:[0-9a-f]{64})$|\1|p'
+          }
+
+          head_digest=$(digest_at HEAD)
+          base_digest=$(digest_at "$BASE")
+
+          for d in "$head_digest" "$base_digest"; do
+            case "$d" in
+              sha256:[0-9a-f]*) ;;
+              *)
+                echo "::error::no digest found in action.yml: '${d}'"
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "base: $base_digest"
+          echo "head: $head_digest"
+
+          if [ "$head_digest" = "$base_digest" ]; then
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+            echo "The pinned digest is unchanged; nothing to verify." \
+              >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >>"$GITHUB_OUTPUT"
+            echo "DIGEST=${head_digest}" >>"$GITHUB_ENV"
+          fi
+
+      - name: Set Up Buildx
+        id: buildx
+        if: steps.changed.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          version: v0.36.1
+          cache-binary: false
+          driver-opts: |
+            image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+
+      # The revision label is a build input, and the image was built from the
+      # commit *before* this pull request, so rebuilding with this checkout's
+      # own SHA could never match. R is read back off the image rather than
+      # guessed - and the diff below is what keeps R from being a claim the
+      # image makes about itself with nothing behind it.
+      - name: Read the revision the image claims
+        id: revision
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          rev=$(docker buildx imagetools inspect "ghcr.io/${GITHUB_REPOSITORY}@${DIGEST}" \
+            --format '{{json .Image}}' |
+            jq -r 'first(.. | objects | .["org.opencontainers.image.revision"]? // empty)')
+
+          case "$rev" in
+            [0-9a-f]*) ;;
+            *)
+              echo "::error::the image at ${DIGEST} carries no revision label"
+              exit 1
+              ;;
+          esac
+
+          if ! git cat-file -e "${rev}^{commit}" 2>/dev/null; then
+            echo "::error::the image claims commit ${rev}, which is not in this repository"
+            exit 1
+          fi
+
+          echo "REV=${rev}" >>"$GITHUB_ENV"
+          echo "the image at ${DIGEST} claims to be built from ${rev}"
+
+      # The stale-digest failure, caught directly: identical build inputs mean
+      # the image at R is an image of the source being merged. publish-image.yml
+      # is on the list because the buildx and buildkit pins live there, and they
+      # decide the bytes a build produces as much as the Dockerfile does.
+      - name: Check the build inputs are unchanged since that commit
+        id: inputs
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          paths="cmd internal go.mod go.sum Dockerfile .github/workflows/publish-image.yml"
+
+          # shellcheck disable=SC2086
+          if ! git diff --quiet "$REV" HEAD -- $paths; then
+            echo "::error::build inputs differ between ${REV} and this pull request"
+            # shellcheck disable=SC2086
+            git diff --stat "$REV" HEAD -- $paths
+            exit 1
+          fi
+
+          echo "build inputs are identical to ${REV}"
+
+      - name: Resolve SOURCE_DATE_EPOCH
+        id: epoch
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          epoch=$(git log -1 --pretty=%ct "$REV")
+          case "$epoch" in
+            '' | *[!0-9]*)
+              echo "::error::no commit date for SOURCE_DATE_EPOCH: '${epoch}'"
+              exit 1
+              ;;
+          esac
+          echo "SOURCE_DATE_EPOCH=${epoch}" >>"$GITHUB_ENV"
+
+      # Every flag has to match what publish-image.yml passed, or this rebuilds
+      # something else. The exporter differs - an OCI layout rather than a push -
+      # which ci.yml's third build is what makes safe.
+      - name: Rebuild
+        id: rebuild
+        if: steps.changed.outputs.changed == 'true'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          outputs: type=oci,dest=/tmp/image,tar=false,rewrite-timestamp=true,oci-mediatypes=true
+          labels: org.opencontainers.image.revision=${{ env.REV }}
+          provenance: false
+
+      - name: Compare with the pinned digest
+        id: compare
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          built=$(jq -r '.manifests[0].digest // ""' /tmp/image/index.json)
+
+          echo "pinned: $DIGEST"
+          echo "built:  $built"
+
+          case "$built" in
+            sha256:[0-9a-f]*) ;;
+            *)
+              echo "::error::not a digest: '${built}'"
+              exit 1
+              ;;
+          esac
+
+          if [ "$built" != "$DIGEST" ]; then
+            echo "::error::the pinned digest does not reproduce: ${DIGEST} != ${built}"
+            exit 1
+          fi
+
+          {
+            echo "### Pinned digest verified"
+            echo
+            echo "\`${DIGEST}\` rebuilds from \`${REV}\`, whose build inputs are"
+            echo "identical to this pull request."
+          } >>"$GITHUB_STEP_SUMMARY"
