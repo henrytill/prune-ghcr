@@ -188,6 +188,14 @@ never match. `R` is read off the image rather than guessed, and step 3 is what
 stops `R` from being a claim the image makes about itself with nothing behind
 it.
 
+Step 3 compares against the pull request, not against `main`, so the `main`
+ruleset sets `strict_required_status_checks_policy` and a digest pull request
+has to be up to date before it can merge. Without that, the check answers a
+question that has since gone stale: verify the digest, merge something else that
+touches `internal/`, then merge the digest pull request on its old green tick,
+and the pin now names an image of source that is no longer `main` — the exact
+failure this exists to catch. The setting is load-bearing, not hygiene.
+
 The check belongs on the merge and not on the release tag. The `main` ruleset
 has required status checks, so a merge can be gated; the `release tags` ruleset
 has only `deletion`, so a tag cannot be — and because tag deletion is blocked, a
