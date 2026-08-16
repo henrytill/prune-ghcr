@@ -205,7 +205,6 @@ func TestSkipsVersionsWithNoUsableTimestamp(t *testing.T) {
 
 	result, log := run(t, options(), versions, &fakeRegistry{})
 
-	// The TypeScript version deleted this one, because NaN > cutoff is false.
 	if got := versions.deletedIDs; len(got) != 1 || got[0] != 2 {
 		t.Errorf("deleted ids = %v, want [2]", got)
 	}

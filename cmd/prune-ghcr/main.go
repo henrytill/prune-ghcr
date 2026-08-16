@@ -113,14 +113,14 @@ func run(ctx context.Context) error {
 
 // parseMinAge converts the min-age-hours input to a duration.
 //
-// An empty value is zero rather than an error, because the TypeScript version
-// read this with Number(), where Number("") is 0. A caller passing an unset
-// expression through this input is green today and must stay green.
+// An empty value is zero rather than an error: an unset expression reaching this
+// input has always been accepted, and a caller whose workflow passes one is
+// green today and must stay green.
 func parseMinAge(input string) (time.Duration, error) {
 	if input == "" {
 		return 0, nil
 	}
-	// ParseFloat accepts "NaN" and "Inf", which Number.isFinite rejected.
+	// ParseFloat accepts "NaN" and "Inf", neither of which is an age.
 	hours, err := strconv.ParseFloat(input, 64)
 	if err != nil || math.IsNaN(hours) || math.IsInf(hours, 0) || hours < 0 {
 		return 0, fmt.Errorf("min-age-hours must be a non-negative number, got '%s'", input)
