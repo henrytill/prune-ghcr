@@ -1,4 +1,13 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.26.0@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+
+# The directive above has to be the first line: a comment before it is not a
+# parser directive, and silently turns it into an ordinary comment.
+#
+# The frontend is pinned by digest rather than left on the floating `1` tag. It
+# is a build input like any other - it decides how layers and the image config
+# are produced - so a newer frontend can give this source a different digest.
+# CI cannot catch that, because both of its builds resolve the same frontend
+# seconds apart; it would surface as a failed reproduction months later.
 
 # The builder is pinned to the toolchain in go.mod. TARGETOS and TARGETARCH are
 # supplied by buildx, so one Dockerfile covers both amd64 and arm64.
