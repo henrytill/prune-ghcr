@@ -207,15 +207,13 @@ jobs:
 
           # Without this, an index that stops carrying a digest where these read
           # for one leaves all three empty, and a guard that compares nothing
-          # against nothing passes.
+          # against nothing passes. The length is part of that: `sha256:[0-9a-f]*`
+          # would accept a bare `sha256:`, and two of those compare equal too.
           for d in "$a" "$b" "$PUSHED"; do
-            case "$d" in
-              sha256:[0-9a-f]*) ;;
-              *)
-                echo "::error::not a digest: '${d}'"
-                exit 1
-                ;;
-            esac
+            if [[ ! $d =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::not a digest: '${d}'"
+              exit 1
+            fi
           done
 
           if [ "$a" != "$b" ]; then
