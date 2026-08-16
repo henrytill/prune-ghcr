@@ -77,6 +77,7 @@ runs:
       shell: bash
       env:
         REVISION: ${{ inputs.revision }}
+        OUTPUT: ${{ inputs.output }}
       run: |
         if [[ ! $REVISION =~ ^[0-9a-f]{40}$ ]]; then
           echo "::error::build-image needs a full commit sha as its revision (got '${REVISION}')"
@@ -87,6 +88,19 @@ runs:
           echo "::error::build-image needs SOURCE_DATE_EPOCH set, from script/source-date-epoch (got '${SOURCE_DATE_EPOCH:-}')"
           exit 1
         fi
+
+        # The fixed attributes are appended to whatever `output` says, so a
+        # caller naming one of them wins or loses by buildx's parse order rather
+        # than by anything written down. `oci-mediatypes=false` from a caller
+        # would produce a Docker manifest list where the point is an OCI index,
+        # and the parity build would not catch it, because it would be the
+        # caller that differed.
+        for fixed in rewrite-timestamp oci-mediatypes; do
+          if [[ ,${OUTPUT}, == *",${fixed}="* ]]; then
+            echo "::error::build-image sets ${fixed}; ${OUTPUT} must not"
+            exit 1
+          fi
+        done
 
     - name: Build
       id: build
