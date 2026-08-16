@@ -37,15 +37,18 @@ read the list it reports before letting it delete anything.
 
 ## How this repository is protected
 
-- `main` requires a pull request, and the CI, `check-dist`, lint, and CodeQL
-  checks must pass before merging
-- `dist/` is rebuilt and diffed by the `check-dist` workflow on every pull
-  request, so the committed bundle cannot drift from the source it claims to
-  come from
-- every third-party action is pinned by commit SHA, and the repository is
+- `main` requires a pull request, and the tests, lint, CodeQL, image
+  reproducibility and digest verification checks must all pass before merging
+- the action runs a prebuilt image referenced by digest, so `uses:` at a commit
+  pins the code that runs and not just a file naming a mutable tag
+- that image is built reproducibly, and `verify-digest.yml` refuses to merge a
+  change to the pinned digest unless the digest rebuilds from the source being
+  merged -- so the image cannot drift from the source it claims to come from
+- every third-party action is pinned by commit SHA, as are the builder, the
+  runtime base, the Dockerfile frontend, buildx and buildkit; the repository is
   restricted to an allowlist of actions
-- `npm ci --ignore-scripts` in CI, so a compromised dependency's install script
-  does not execute
+- the image is built from `go.mod` and `go.sum` with no install scripts to run,
+  and `licensed` tracks what those dependencies are
 - CodeQL, Trivy, `licensed`, gitleaks, and zizmor run over the codebase and its
   workflows
 - workflows request read-only `GITHUB_TOKEN` permissions except where a write is
