@@ -69,6 +69,9 @@ What gets it there:
 
 - `-trimpath` and `CGO_ENABLED=0`, so the Go binary does not embed build paths
 - a pinned toolchain and a base image pinned by digest
+- the Dockerfile frontend pinned by digest, since `# syntax=docker/dockerfile:1`
+  resolves to whatever is newest and the frontend decides how layers and the
+  image config are produced
 - `provenance: false`, since an attestation records the time it was made
 - `SOURCE_DATE_EPOCH`, taken from the commit date — the one clock a third party
   rebuilding that commit also has
@@ -77,9 +80,9 @@ What gets it there:
 - `oci-mediatypes=true` on every export, so that a digest does not depend on
   which exporter produced it
 
-The middle two go together. `SOURCE_DATE_EPOCH` alone fixes the created time in
-the image config, but the layers `COPY` produces still carry the build time, and
-those are what the digest is over.
+`SOURCE_DATE_EPOCH` and `rewrite-timestamp` go together. `SOURCE_DATE_EPOCH`
+alone fixes the created time in the image config, but the layers `COPY` produces
+still carry the build time, and those are what the digest is over.
 
 The last one is insurance against a difference that is easy to miss. Media types
 are part of the manifest bytes, so an OCI index and a Docker manifest list over
