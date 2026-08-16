@@ -40,6 +40,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LINTER_RULES_PATH: .
           VALIDATE_ALL_CODEBASE: true
+          # Not leftovers from the TypeScript action, despite there being no
+          # JavaScript here: biome also formats and lints JSON, and the JSON
+          # this repository does have -- .vscode/settings.json and the
+          # devcontainer -- does not match what biome would write. Turning
+          # these on reformats editor configuration to satisfy a linter, which
+          # is the wrong way round.
           VALIDATE_BIOME_FORMAT: false
           VALIDATE_BIOME_LINT: false
           # Neither Go mode works on this layout. VALIDATE_GO lints individual
@@ -52,7 +58,5 @@ jobs:
           # same .golangci.yml.
           VALIDATE_GO: false
           VALIDATE_GO_MODULES: false
-          VALIDATE_JAVASCRIPT_ES: false
           VALIDATE_JSCPD: false
-          VALIDATE_TYPESCRIPT_ES: false
           VALIDATE_JSON: false
