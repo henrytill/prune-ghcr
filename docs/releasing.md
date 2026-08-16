@@ -162,7 +162,11 @@ rev=$(git rev-parse HEAD)
 docker buildx create --use --driver docker-container \
   --driver-opt image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
 
-SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct "$rev") \
+# These flags have to match .github/actions/build-image, which is what every
+# build in CI goes through. This block is the one copy of them that nothing
+# checks, so read them off that file rather than trusting this one: the
+# platforms, the provenance, and the two attributes on --output.
+SOURCE_DATE_EPOCH=$(script/source-date-epoch "$rev") \
   docker buildx build . \
     --platform linux/amd64,linux/arm64 \
     --label "org.opencontainers.image.revision=${rev}" \
