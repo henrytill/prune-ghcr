@@ -157,7 +157,7 @@ Reproducing someone else's build from a checkout of a different commit will not
 match, and should not: the revision label is what makes a digest auditable back
 to a commit.
 
-### The ordering rule stays
+### The ordering is checked, not just followed
 
 CI builds every pull request twice — second pass with `no-cache`, or the rebuild
 replays the first one's layers and compares a result against itself — plus a
@@ -165,8 +165,33 @@ third time through the pushing exporter, and fails if the digests differ. That
 is what keeps this honest: a single new source of nondeterminism would otherwise
 break reproducibility silently and only surface at release time.
 
-But the release still does not verify itself. Reproducibility could in principle
-dissolve the ordering constraint rather than manage it, by having a release tag
-rebuild and check its own digest. Until something actually does that, **publish,
-merge, then tag** remains a rule people follow, and `script/release` remains the
-only thing enforcing it.
+Reproducibility is also what lets the ordering be verified rather than followed
+correctly. `verify-digest.yml` runs on every pull request and, when the digest
+line in `action.yml` differs from the base branch, does this:
+
+1. Reads the pinned digest `D` out of `action.yml`.
+1. Reads `org.opencontainers.image.revision` back off the image at `D` — call it
+   `R`, the commit the image claims to be built from.
+1. `git diff --quiet R HEAD` over the build inputs: `cmd`, `internal`, `go.mod`,
+   `go.sum`, the `Dockerfile`, and `publish-image.yml`, where the buildx and
+   buildkit pins live. Empty means the image at `R` is an image of the source
+   being merged, which is the stale-digest failure caught directly.
+1. Rebuilds at this checkout, with `SOURCE_DATE_EPOCH` from `R`'s commit date
+   and the revision label set to `R`.
+1. Fails unless the rebuilt digest equals `D`.
+
+Step 2 is what makes this possible at all: the image is built from the commit
+_before_ the digest commit, so rebuilding with the pull request's own SHA could
+never match. `R` is read off the image rather than guessed, and step 3 is what
+stops `R` from being a claim the image makes about itself with nothing behind
+it.
+
+The check belongs on the merge and not on the release tag. The `main` ruleset
+has required status checks, so a merge can be gated; the `release tags` ruleset
+has only `deletion`, so a tag cannot be — and because tag deletion is blocked, a
+tag that failed verification could not even be withdrawn. Recovering would cost
+a version number.
+
+`script/release`'s third check — the pinned digest carries the tag being
+released — stays as a backstop. It is no longer the only thing standing between
+a mis-ordered release and a broken pin.
