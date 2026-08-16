@@ -61,16 +61,13 @@ jobs:
           driver-opts: |
             image=${{ steps.pins.outputs.BUILDKIT_IMAGE }}
 
-      # `changed` gates the rest; the other values are what the rebuild needs.
-      # pipefail matters here: without it the exit status is tee's, and a failed
-      # plan would skip verification while reporting success.
+      # The script routes its own results: `changed` to GITHUB_OUTPUT, since it
+      # gates the steps below, and the rebuild's inputs to GITHUB_ENV.
       - name: Plan the verification
         id: plan
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -o pipefail
-          script/verify-digest "$BASE" | tee -a "$GITHUB_ENV" >>"$GITHUB_OUTPUT"
+        run: script/verify-digest "$BASE"
 
       # Every flag has to match what publish-image.yml passed, or this rebuilds
       # something else. The exporter differs - an OCI layout rather than a push -

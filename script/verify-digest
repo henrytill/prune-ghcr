@@ -7,15 +7,20 @@ set -e
 # About:
 #
 # Decides whether the digest action.yml pins needs verifying against a base
-# commit, and works out what rebuilding it would take. Prints key=value lines:
+# commit, and works out what rebuilding it would take. Reports:
 #
 #   changed=false                       the pinned image is unchanged; stop here
 #
 #   changed=true
-#   IMAGE=ghcr.io/owner/name@sha256:... the pinned image
-#   DIGEST=sha256:...                   its digest, for the comparison
+#   DIGEST=sha256:...                   the pinned digest, for the comparison
 #   REV=<commit>                        the commit it claims to be built from
 #   SOURCE_DATE_EPOCH=<seconds>         that commit's date
+#
+# Everything goes to stdout when run by hand. Under Actions, `changed` is written
+# to GITHUB_OUTPUT, because it gates later steps, and the rest to GITHUB_ENV,
+# because the build step reads them - rather than putting all of it in both,
+# which leaves a name as ordinary as `changed` in the environment of every step
+# in the job.
 #
 # This does not rebuild, because the rebuild runs through buildx rather than
 # through a shell. The caller rebuilds with REV as the revision label and that
@@ -57,11 +62,26 @@ build_inputs=(
 	.github/workflows/publish-image.yml
 )
 
+# Under Actions these land where the workflow needs them; by hand they are just
+# printed. Appending to GITHUB_OUTPUT or GITHUB_ENV when the variable is empty
+# would write to a file named by the empty string, so both are guarded.
+gates() {
+	echo "$@"
+	[[ -n ${GITHUB_OUTPUT:-} ]] && echo "$@" >>"$GITHUB_OUTPUT"
+	return 0
+}
+
+exports() {
+	echo "$@"
+	[[ -n ${GITHUB_ENV:-} ]] && echo "$@" >>"$GITHUB_ENV"
+	return 0
+}
+
 head_image=$(script/pinned-image HEAD)
 base_image=$(script/pinned-image "$base")
 
 if [[ $head_image == "$base_image" ]]; then
-	echo "changed=false"
+	gates "changed=false"
 	exit 0
 fi
 
@@ -80,8 +100,7 @@ if ! git diff --quiet "$revision" HEAD -- "${build_inputs[@]}"; then
 	exit 1
 fi
 
-echo "changed=true"
-echo "IMAGE=${head_image}"
-echo "DIGEST=${digest}"
-echo "REV=${revision}"
-echo "SOURCE_DATE_EPOCH=$(script/source-date-epoch "$revision")"
+gates "changed=true"
+exports "DIGEST=${digest}"
+exports "REV=${revision}"
+exports "SOURCE_DATE_EPOCH=$(script/source-date-epoch "$revision")"
