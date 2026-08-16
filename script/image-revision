@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Exit early
+# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
+set -e
+
+# About:
+#
+# Prints the commit an image was built from, read from its
+# org.opencontainers.image.revision label.
+#
+# The label is a build input, so reproducing an image requires knowing it, and
+# guessing is not an option: the image a release pins was built from the commit
+# *before* the one that pins it. See "Reproducing a published image" in
+# docs/releasing.md.
+#
+# The label lives in each platform's image config rather than in the index, so
+# this reads whichever one it finds first. They are built from one commit and
+# have never disagreed; if they ever did, the rebuild would fail loudly rather
+# than silently verify the wrong thing.
+#
+# Usage:
+#
+# script/image-revision <image>
+#
+# e.g. script/image-revision ghcr.io/henrytill/prune-ghcr@sha256:...
+
+image="$1"
+
+if [[ -z $image ]]; then
+	echo "usage: script/image-revision <image>" >&2
+	exit 2
+fi
+
+revision=$(docker buildx imagetools inspect "$image" --format '{{json .Image}}' |
+	jq -r 'first(.. | objects | .["org.opencontainers.image.revision"]? // empty)')
+
+if [[ -z $revision ]]; then
+	echo "${image} carries no org.opencontainers.image.revision label" >&2
+	exit 1
+fi
+
+echo "$revision"

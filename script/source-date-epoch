@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Exit early
+# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
+set -e
+
+# About:
+#
+# Prints a commit's date, as the seconds-since-epoch value SOURCE_DATE_EPOCH
+# takes. Every build input has to be a function of the source, timestamps
+# included, and the commit date is the one clock a third party rebuilding that
+# commit also has.
+#
+# Anything other than a number is a failure rather than empty output. buildx
+# reads an empty SOURCE_DATE_EPOCH as unset, `rewrite-timestamp` then rewrites
+# nothing, and the image carries build times while everything still reports
+# success.
+#
+# Usage:
+#
+# script/source-date-epoch [<ref>]
+
+ref="${1:-HEAD}"
+
+epoch=$(git log -1 --pretty=%ct "$ref")
+
+case $epoch in
+'' | *[!0-9]*)
+	echo "no commit date for ${ref}: '${epoch}'" >&2
+	exit 1
+	;;
+esac
+
+echo "$epoch"
