@@ -63,7 +63,7 @@ repository="${name#*/}"
 # https://prune-ghcr for a repository named prune-ghcr and fails as though the
 # registry were down; `docker.io/alpine` misses the implicit library/ namespace
 # the same way. Both are bad references and should read as bad references.
-if [[ $name != */* || ( $host != *.* && $host != *:* && $host != localhost ) ]]; then
+if [[ $name != */* || ($host != *.* && $host != *:* && $host != localhost) ]]; then
 	echo "${image} needs a registry host, e.g. ghcr.io/owner/name@sha256:..." >&2
 	exit 2
 fi
