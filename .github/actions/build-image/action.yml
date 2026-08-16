@@ -1,0 +1,88 @@
+name: Build the image
+description: >-
+  Builds the action's image with the flags that decide its digest, so that every
+  build of it - publishing, the reproducibility checks, and the rebuild that
+  verifies a pinned digest - produces the same bytes from the same source.
+
+# The flags below are not configuration. `platforms`, `rewrite-timestamp`,
+# `oci-mediatypes` and `provenance` are part of what the digest is over, so a
+# caller that passed its own would be building a different image and comparing
+# it against one it did not build. They live here for the same reason the buildx
+# and buildkit pins live in one file: five copies kept identical by comments is
+# not the same as one copy.
+#
+# What callers do vary is where the result goes, and whether the builder cache
+# may answer.
+inputs:
+  output:
+    description: >-
+      Where the result goes, as the exporter part of buildx's `--output`,
+      without the flags this action fixes. Either
+      `type=oci,dest=<dir>,tar=false` or `type=image,push=true`.
+    required: true
+  revision:
+    description: >-
+      The commit to record as org.opencontainers.image.revision. A build input,
+      so a rebuild has to pass what the original build passed - which for a
+      published image is readable with script/image-revision.
+    required: true
+  tags:
+    description: Tags to push, for the image exporter. Ignored by an OCI export.
+    required: false
+    default: ''
+  no-cache:
+    description: >-
+      Build every layer again. What a second build in the same job needs, or it
+      replays the first one's layers and compares a result against itself.
+    required: false
+    default: 'false'
+
+outputs:
+  digest:
+    description: >-
+      The digest buildx reported, for the image exporter. An OCI export leaves
+      nothing here; read the layout with script/layout-digest instead.
+    value: ${{ steps.build.outputs.digest }}
+
+runs:
+  using: composite
+  steps:
+    # A composite action rather than a reusable workflow, so that these steps
+    # run in the calling job. reproducible-image builds three times on one
+    # runner on purpose, compares OCI layouts in /tmp, and pushes to a registry
+    # service defined on that job - none of which survives being split across
+    # jobs. It also keeps the reported check names, which the main ruleset
+    # requires by name.
+    # `required: true` above is documentation: the runner does not enforce it
+    # for a composite action, so an omitted revision arrives as an empty string
+    # and the build would label the image with nothing. That is worst in
+    # publish-image.yml, where it publishes an image whose commit cannot be read
+    # back - and an image whose revision cannot be read is one that can never be
+    # verified or reproduced.
+    #
+    # Not defaulted to github.sha, deliberately. Four callers would want that and
+    # verify-digest.yml's rebuild must not have it: it passes the commit read off
+    # the published image, and a default would turn the one site that differs
+    # into a silent exception whose symptom is a digest mismatch reported as
+    # nondeterminism.
+    - name: Check a revision was given
+      shell: bash
+      env:
+        REVISION: ${{ inputs.revision }}
+      run: |
+        if [[ ! $REVISION =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::build-image needs a full commit sha as its revision (got '${REVISION}')"
+          exit 1
+        fi
+
+    - name: Build
+      id: build
+      uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        outputs: ${{ inputs.output }},rewrite-timestamp=true,oci-mediatypes=true
+        labels: org.opencontainers.image.revision=${{ inputs.revision }}
+        tags: ${{ inputs.tags }}
+        no-cache: ${{ inputs.no-cache }}
+        provenance: false

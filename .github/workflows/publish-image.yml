@@ -84,32 +84,21 @@ jobs:
       # Go cross-compiles, so both platforms build natively on the runner and
       # no QEMU emulation is involved.
       #
-      # `outputs` rather than `push: true`, which is the same registry export
-      # without the `rewrite-timestamp` attribute. SOURCE_DATE_EPOCH alone only
-      # fixes the image config's created time; the layers COPY produces still
-      # carry the build time, and rewriting those is what makes the digest
-      # stable. See docs/releasing.md.
-      #
-      # `oci-mediatypes=true` so that this export and ci.yml's `type=oci` one
-      # agree. Media types are part of the manifest bytes, so a difference here
-      # gives the same image two digests and makes a rebuild look like a
-      # mismatch. buildx documents this exporter as defaulting it to false and
-      # `type=oci` to true, but the images pushed from here have been OCI
-      # indices anyway; naming it means the parity does not depend on which of
-      # those is accurate.
+      # An `output` rather than `push: true`: the same registry export, but one
+      # the build-image action can attach `rewrite-timestamp` and
+      # `oci-mediatypes` to. Both are why this image reproduces at all, and both
+      # now live there rather than being restated at each build. See
+      # docs/releasing.md.
       - name: Build and Push
         id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: ./.github/actions/build-image
         with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          outputs: type=image,push=true,rewrite-timestamp=true,oci-mediatypes=true
+          output: type=image,push=true
           tags: ghcr.io/${{ github.repository }}:${{ inputs.tag }}
           # The revision is what makes the pin auditable: given a digest, the
           # commit it was built from can be read back out of the image. It is
           # also a build input, so a rebuild has to pass the same value.
-          labels: org.opencontainers.image.revision=${{ github.sha }}
-          provenance: false
+          revision: ${{ github.sha }}
 
       # action.yml is not a build input, so a commit that changes only this line
       # produces the same image. That is what makes publishing before the commit
