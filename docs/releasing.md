@@ -222,7 +222,20 @@ podman run -d --name bk --privileged \
   docker.io/moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
 
 # buildkitd needs a moment to create its socket, and `podman exec` does not wait.
-until podman exec bk buildctl debug workers >/dev/null 2>&1; do sleep 0.5; done
+# Bounded, and checking the container is still up: an unbounded wait on a
+# container that failed to start -- name still in use from an earlier
+# attempt, a host that wanted more than --privileged -- hangs instead of
+# saying anything, which is the worst way for a pasted recipe to fail.
+for _ in $(seq 40); do
+	up=$(podman container inspect -f '{{.State.Running}}' bk 2>/dev/null)
+	[[ $up == true ]] || break
+	podman exec bk buildctl debug workers >/dev/null 2>&1 && break
+	sleep 0.5
+done
+podman exec bk buildctl debug workers >/dev/null || {
+	echo "buildkitd did not come up; podman logs bk" >&2
+	exit 1
+}
 
 podman exec bk buildctl build \
   --frontend dockerfile.v0 \
