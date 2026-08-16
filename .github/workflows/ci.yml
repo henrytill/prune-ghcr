@@ -207,21 +207,33 @@ jobs:
           a=$(script/layout-digest /tmp/image-a)
           b=$(script/layout-digest /tmp/image-b)
 
+          # Before the comparison, so that a red run says which build produced
+          # which digest. assert-digest reports the two values it was given and
+          # cannot know that one of them is the no-cache rebuild.
+          echo "first build:  ${a}"
+          echo "second build: ${b}"
+
           # Assigned rather than interpolated into the echo, for the reason
           # given on the epoch step above.
           digest=$(script/assert-digest "$a" "$b")
-          echo "both builds: ${digest}"
-          echo "DIGEST=${digest}" >>"$GITHUB_ENV"
+          echo "digest=${digest}" >>"$GITHUB_OUTPUT"
 
+      # Both digests arrive the same way, as step outputs named in `env`, rather
+      # than one of them being in the job's environment for every later step to
+      # inherit. script/verify-digest makes the same argument about `changed`.
       - name: Check the exporters agree
         id: parity-compare
         env:
+          BUILT: ${{ steps.compare.outputs.digest }}
           PUSHED: ${{ steps.parity.outputs.digest }}
         run: |
-          script/assert-digest "$DIGEST" "$PUSHED"
+          echo "oci export:   ${BUILT}"
+          echo "pushed build: ${PUSHED}"
+
+          script/assert-digest "$BUILT" "$PUSHED"
 
           echo "### Reproducible image" >>"$GITHUB_STEP_SUMMARY"
-          echo "Built three times, all \`${DIGEST}\`." >>"$GITHUB_STEP_SUMMARY"
+          echo "Built three times, all \`${BUILT}\`." >>"$GITHUB_STEP_SUMMARY"
 
   # An end-to-end run needs a PAT and a real package, neither of which a fork's
   # pull request has; see the dry-run workflow for that.
