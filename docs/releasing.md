@@ -72,6 +72,10 @@ What gets it there:
 - the Dockerfile frontend pinned by digest, since `# syntax=docker/dockerfile:1`
   resolves to whatever is newest and the frontend decides how layers and the
   image config are produced
+- buildx and buildkit pinned on both workflows, through `version` and a
+  `driver-opts: image=moby/buildkit:...@sha256:...` — the SHA on
+  `setup-buildx-action` pins the action, which by default installs the newest
+  buildx and runs the mutable `moby/buildkit:buildx-stable-1`
 - `provenance: false`, since an attestation records the time it was made
 - `SOURCE_DATE_EPOCH`, taken from the commit date — the one clock a third party
   rebuilding that commit also has
@@ -79,6 +83,13 @@ What gets it there:
   `outputs: type=image,push=true,...` rather than `push: true`
 - `oci-mediatypes=true` on every export, so that a digest does not depend on
   which exporter produced it
+
+The pins are what make the promise hold for someone else. Everything a build
+resolves by tag is a version two CI builds seconds apart necessarily agree on
+and a rebuild months later does not, so pinning is the only way to cover them —
+the twice-built job cannot. Bumping one of these pins is expected to change the
+digest of unchanged source; that is a normal commit, not a reproducibility
+failure.
 
 `SOURCE_DATE_EPOCH` and `rewrite-timestamp` go together. `SOURCE_DATE_EPOCH`
 alone fixes the created time in the image config, but the layers `COPY` produces
@@ -104,8 +115,11 @@ checkout's:
 git checkout <the commit being reproduced>
 rev=$(git rev-parse HEAD)
 
-# The default docker driver cannot build more than one platform at a time.
-docker buildx create --use --driver docker-container
+# The default docker driver cannot build more than one platform at a time, and
+# the buildkit version is a build input, so use the one publish-image.yml pins
+# at the commit checked out above rather than the one written here.
+docker buildx create --use --driver docker-container \
+  --driver-opt image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
 
 SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct "$rev") \
   docker buildx build . \
