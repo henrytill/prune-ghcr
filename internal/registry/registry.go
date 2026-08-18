@@ -38,25 +38,28 @@ type Client struct {
 
 // NewClient returns a client authorized to read a repository's manifests.
 //
-// registryHost is injectable so the tests can point it at an httptest server;
-// an empty value selects ghcr.io. Unlike the hand-rolled client this replaced,
-// no token is exchanged here: go-containerregistry performs the exchange lazily
-// on the first request, so a bad token surfaces at the first manifest read
-// rather than at construction.
-func NewClient(
-	registryHost, owner, packageName, githubToken string, warn func(string),
-) (*Client, error) {
-	if registryHost == "" {
-		registryHost = Host
-	}
+// Unlike the hand-rolled client this replaced, no token is exchanged here:
+// go-containerregistry performs the exchange lazily on the first request, so a
+// bad token surfaces at the first manifest read rather than at construction.
+func NewClient(owner, packageName, githubToken string, warn func(string)) (*Client, error) {
+	return newClient(Host, false, owner, packageName, githubToken, warn)
+}
 
+// newClient is NewClient with the registry located explicitly, so the tests can
+// point it at an httptest server. plaintext is asked for rather than inferred
+// from the host: a registry really served at localhost is still served over
+// HTTPS unless the caller says otherwise.
+func newClient(
+	registryHost string, plaintext bool,
+	owner, packageName, githubToken string, warn func(string),
+) (*Client, error) {
 	// Registry paths are lowercase, even when the GitHub owner or package name
 	// is not.
 	path := fmt.Sprintf("%s/%s/%s", registryHost,
 		strings.ToLower(owner), strings.ToLower(packageName))
 
 	options := []name.Option{}
-	if isLoopback(registryHost) {
+	if plaintext {
 		options = append(options, name.Insecure)
 	}
 
@@ -98,14 +101,6 @@ func (c *Client) resetPuller() {
 	if puller, err := remote.NewPuller(c.options...); err == nil {
 		c.puller = puller
 	}
-}
-
-// isLoopback reports whether host is an httptest server rather than a real
-// registry, which is the only case that speaks plain HTTP.
-func isLoopback(host string) bool {
-	return strings.HasPrefix(host, "127.0.0.1:") ||
-		strings.HasPrefix(host, "localhost:") ||
-		strings.HasPrefix(host, "[::1]:")
 }
 
 // labelWidth truncates a digest for log lines: "sha256:" plus twelve hex
