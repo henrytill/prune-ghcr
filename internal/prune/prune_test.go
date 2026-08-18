@@ -3,6 +3,7 @@ package prune
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -71,12 +72,9 @@ func (r *recorder) Warning(message string) { r.warnings = append(r.warnings, mes
 func (r *recorder) Error(message string)   { r.errors = append(r.errors, message) }
 
 func contains(messages []string, substring string) bool {
-	for _, message := range messages {
-		if strings.Contains(message, substring) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(messages, func(message string) bool {
+		return strings.Contains(message, substring)
+	})
 }
 
 func options() Options {
