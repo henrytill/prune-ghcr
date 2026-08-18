@@ -22,7 +22,9 @@ type Versions interface {
 
 // ManifestReader is the subset of the registry this package depends on.
 type ManifestReader interface {
-	ReadManifest(ctx context.Context, reference string) (registry.Manifest, error)
+	// ReadManifest returns the digests of the manifests under reference, which
+	// is empty unless it is a multi-arch index.
+	ReadManifest(ctx context.Context, reference string) ([]string, error)
 }
 
 // Logger receives the action's log output.
@@ -92,14 +94,14 @@ func referenced(
 	// Sorted so the log output is reproducible: map iteration order is
 	// randomized.
 	for _, digest := range slices.Sorted(maps.Keys(keep)) {
-		manifest, err := manifests.ReadManifest(ctx, digest)
+		children, err := manifests.ReadManifest(ctx, digest)
 		if err != nil {
 			// Deleting a child of a manifest we could not read would break a
 			// live tag, so refuse to guess.
 			return nil, fmt.Errorf("could not read %s: %w", digest, err)
 		}
-		for _, child := range manifest.Manifests {
-			keep[child.Digest] = struct{}{}
+		for _, child := range children {
+			keep[child] = struct{}{}
 		}
 	}
 	log.Info(fmt.Sprintf("    keeping %d version(s)", len(keep)))

@@ -27,16 +27,6 @@ import (
 // Host is the registry the action prunes.
 const Host = "ghcr.io"
 
-// Manifest is an image manifest. Manifests is populated on a multi-arch index.
-type Manifest struct {
-	Manifests []Descriptor
-}
-
-// Descriptor points at a manifest under an index.
-type Descriptor struct {
-	Digest string
-}
-
 // Client reads manifests from one repository. It is not safe for concurrent
 // use: a failed read replaces the cached authentication.
 type Client struct {
@@ -122,20 +112,19 @@ func isLoopback(host string) bool {
 // characters, the abbreviation docker itself prints.
 const labelWidth = len("sha256:") + 12
 
-// ReadManifest fetches a manifest by digest.
+// ReadManifest fetches a manifest by digest and returns the digests of the
+// manifests under it, which is empty unless it is a multi-arch index.
 //
 // The puller negotiates the media types itself, so the explicit Accept list the
 // hand-rolled client carried is no longer spelled out here; a single-platform
 // manifest simply comes back with no children.
-func (c *Client) ReadManifest(ctx context.Context, reference string) (Manifest, error) {
+func (c *Client) ReadManifest(ctx context.Context, reference string) ([]string, error) {
 	label := reference
 	if len(label) > labelWidth {
 		label = label[:labelWidth]
 	}
 
-	return retry.Do(ctx, func(ctx context.Context) (Manifest, error) {
-		var manifest Manifest
-
+	return retry.Do(ctx, func(ctx context.Context) ([]string, error) {
 		descriptor, err := c.puller.Get(ctx, c.repository.Digest(reference))
 		if err != nil {
 			err = classify(err)
@@ -150,27 +139,27 @@ func (c *Client) ReadManifest(ctx context.Context, reference string) (Manifest, 
 			if ctx.Err() == nil && !errors.As(err, &nonRetryable) {
 				c.resetPuller()
 			}
-			return manifest, err
+			return nil, err
 		}
 
 		if !descriptor.MediaType.IsIndex() {
-			return manifest, nil
+			return nil, nil
 		}
 
 		index, err := descriptor.ImageIndex()
 		if err != nil {
-			return manifest, classify(err)
+			return nil, classify(err)
 		}
 		indexManifest, err := index.IndexManifest()
 		if err != nil {
-			return manifest, classify(err)
+			return nil, classify(err)
 		}
 
+		children := make([]string, 0, len(indexManifest.Manifests))
 		for _, child := range indexManifest.Manifests {
-			manifest.Manifests = append(manifest.Manifests,
-				Descriptor{Digest: child.Digest.String()})
+			children = append(children, child.Digest.String())
 		}
-		return manifest, nil
+		return children, nil
 	}, c.backoff.Options("manifest "+label))
 }
 
