@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/henrytill/prune-ghcr/internal/api"
-	"github.com/henrytill/prune-ghcr/internal/registry"
 )
 
 // version builds a container version, optionally tagged and aged.
@@ -47,16 +46,16 @@ func (f *fakeAPI) DeleteVersion(_ context.Context, target api.Target, id int64) 
 }
 
 type fakeRegistry struct {
-	manifests map[string]registry.Manifest
+	manifests map[string][]string
 	err       error
 
 	read []string
 }
 
-func (f *fakeRegistry) ReadManifest(_ context.Context, reference string) (registry.Manifest, error) {
+func (f *fakeRegistry) ReadManifest(_ context.Context, reference string) ([]string, error) {
 	f.read = append(f.read, reference)
 	if f.err != nil {
-		return registry.Manifest{}, f.err
+		return nil, f.err
 	}
 	return f.manifests[reference], nil
 }
@@ -133,10 +132,8 @@ func TestKeepsTaggedVersionsAndChildrenOfATaggedIndex(t *testing.T) {
 			version("sha256:orphan", 4, nil, 0),
 		},
 	}
-	manifests := &fakeRegistry{manifests: map[string]registry.Manifest{
-		"sha256:index": {Manifests: []registry.Descriptor{
-			{Digest: "sha256:amd64"}, {Digest: "sha256:arm64"},
-		}},
+	manifests := &fakeRegistry{manifests: map[string][]string{
+		"sha256:index": {"sha256:amd64", "sha256:arm64"},
 	}}
 
 	result, _ := run(t, options(), versions, manifests)

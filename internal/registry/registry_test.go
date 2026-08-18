@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -105,16 +106,13 @@ func TestReturnsTheChildrenOfAnIndex(t *testing.T) {
 	})
 
 	client := newTestClient(t, server, "henrytill", "p")
-	manifest, err := client.ReadManifest(context.Background(), digestOf(index))
+	children, err := client.ReadManifest(context.Background(), digestOf(index))
 	if err != nil {
 		t.Fatalf("ReadManifest: %v", err)
 	}
 
-	if len(manifest.Manifests) != 2 {
-		t.Fatalf("got %d children, want 2: %+v", len(manifest.Manifests), manifest)
-	}
-	if manifest.Manifests[0].Digest != child || manifest.Manifests[1].Digest != other {
-		t.Errorf("children = %+v, want %s and %s", manifest.Manifests, child, other)
+	if want := []string{child, other}; !slices.Equal(children, want) {
+		t.Errorf("children = %v, want %v", children, want)
 	}
 }
 
@@ -129,13 +127,13 @@ func TestASinglePlatformManifestHasNoChildren(t *testing.T) {
 	})
 
 	client := newTestClient(t, server, "henrytill", "p")
-	manifest, err := client.ReadManifest(context.Background(), digestOf(body))
+	children, err := client.ReadManifest(context.Background(), digestOf(body))
 	if err != nil {
 		t.Fatalf("ReadManifest: %v", err)
 	}
 
-	if len(manifest.Manifests) != 0 {
-		t.Errorf("children = %+v, want none", manifest.Manifests)
+	if len(children) != 0 {
+		t.Errorf("children = %v, want none", children)
 	}
 }
 
