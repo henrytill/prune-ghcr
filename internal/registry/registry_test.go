@@ -55,18 +55,15 @@ func digestOf(body string) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// host strips the scheme, since NewClient takes a registry host.
-func host(server *httptest.Server) string {
-	return strings.TrimPrefix(server.URL, "http://")
-}
-
-// newTestClient points a client at a test server, with the retry backoff
-// turned off so a retry does not sleep.
+// newTestClient points a client at a test server -- over plain HTTP, since
+// httptest serves that -- with the retry backoff turned off so a retry does not
+// sleep.
 func newTestClient(t *testing.T, server *httptest.Server, owner, packageName string) *Client {
 	t.Helper()
-	client, err := NewClient(host(server), owner, packageName, "ghp_tok", nil)
+	host := strings.TrimPrefix(server.URL, "http://")
+	client, err := newClient(host, true, owner, packageName, "ghp_tok", nil)
 	if err != nil {
-		t.Fatalf("NewClient: %v", err)
+		t.Fatalf("newClient: %v", err)
 	}
 	client.backoff.BaseDelay = 0
 	return client
@@ -236,7 +233,7 @@ func TestRetriesAFailedAuthHandshake(t *testing.T) {
 }
 
 func TestRejectsAnUnparseableRepository(t *testing.T) {
-	if _, err := NewClient("ghcr.io", "hen ry", "p", "tok", nil); err == nil {
+	if _, err := NewClient("hen ry", "p", "tok", nil); err == nil {
 		t.Error("NewClient = nil error, want a failure on an invalid repository")
 	}
 }

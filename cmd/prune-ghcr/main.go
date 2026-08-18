@@ -76,7 +76,7 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	manifests, err := registry.NewClient("", owner, packageName, token, actions.Warning)
+	manifests, err := registry.NewClient(owner, packageName, token, actions.Warning)
 	if err != nil {
 		return err
 	}
