@@ -108,17 +108,20 @@ func statusError(response *github.Response, err error) error {
 	if response == nil || response.Response == nil {
 		return err
 	}
-	return retry.NewStatusError(err.Error(), response.StatusCode)
+	return retry.NewStatusError(err, response.StatusCode)
 }
 
 // rateLimitError makes a rate limit retryable after its own wait, or a
 // permanent failure when the wait is longer than the job should stall.
 func rateLimitError(err error, wait time.Duration) error {
 	if wait > maxRateLimitWait {
-		return &retry.NonRetryableError{Message: fmt.Sprintf(
-			"%s (rate limit resets in %s, not waiting)", err, wait.Round(time.Second))}
+		return &retry.NonRetryableError{
+			Message: fmt.Sprintf(
+				"%s (rate limit resets in %s, not waiting)", err, wait.Round(time.Second)),
+			Err: err,
+		}
 	}
-	return &retry.DelayedError{Message: err.Error(), Delay: wait}
+	return &retry.DelayedError{Message: err.Error(), Delay: wait, Err: err}
 }
 
 // AuthenticatedLogin returns the login of the user the token authenticates as.

@@ -130,11 +130,66 @@ func TestTreatsTransientStatusesAsRetryableAndTheRestAsPermanent(t *testing.T) {
 	}
 
 	var nonRetryable *NonRetryableError
-	if errors.As(NewStatusError("m", 502), &nonRetryable) {
+	if errors.As(NewStatusError(errors.New("m"), 502), &nonRetryable) {
 		t.Error("NewStatusError(502) is non-retryable, want retryable")
 	}
-	if !errors.As(NewStatusError("m", 404), &nonRetryable) {
+	if !errors.As(NewStatusError(errors.New("m"), 404), &nonRetryable) {
 		t.Error("NewStatusError(404) is retryable, want non-retryable")
+	}
+}
+
+// libraryError stands in for the *github.ErrorResponse and *transport.Error
+// the two clients hand to NewStatusError.
+type libraryError struct{ code string }
+
+func (e *libraryError) Error() string { return "library: " + e.code }
+
+// TestKeepsTheLibraryErrorReachable is the point of taking an error rather than
+// a string: two failures can share a status and mean different things, and
+// message text is the only way to tell them apart once the typed error is gone.
+func TestKeepsTheLibraryErrorReachable(t *testing.T) {
+	original := &libraryError{code: "MANIFEST_UNKNOWN"}
+
+	for _, status := range []int{404, 502} {
+		wrapped := NewStatusError(original, status)
+
+		var found *libraryError
+		if !errors.As(wrapped, &found) {
+			t.Errorf("NewStatusError(%d) lost the library error", status)
+			continue
+		}
+		if found != original {
+			t.Errorf("NewStatusError(%d) unwrapped to %v, want the original", status, found)
+		}
+	}
+}
+
+// TestDelayedErrorKeepsTheLibraryErrorReachable is the same guarantee for the
+// third constructor. A rate limit is the case where it matters most: the wait
+// is decided from a typed error, so the caller that wants to report which
+// limit was hit needs that error and not the sentence built from it.
+func TestDelayedErrorKeepsTheLibraryErrorReachable(t *testing.T) {
+	original := &libraryError{code: "RATE_LIMITED"}
+	delayed := &DelayedError{Message: "rate limited", Delay: time.Second, Err: original}
+
+	var found *libraryError
+	if !errors.As(delayed, &found) {
+		t.Fatalf("error = %v, want the library error reachable", delayed)
+	}
+}
+
+// TestKeepsTheLibraryErrorReachableThroughDo covers the whole boundary: Do
+// returns what the wrappers built, so errors.As has to reach through it too.
+func TestKeepsTheLibraryErrorReachableThroughDo(t *testing.T) {
+	original := &libraryError{code: "FORBIDDEN"}
+
+	_, err := Do(context.Background(), func(context.Context) (string, error) {
+		return "", NewStatusError(original, 403)
+	}, testOptions(nil))
+
+	var found *libraryError
+	if !errors.As(err, &found) {
+		t.Fatalf("err = %v, want the library error reachable", err)
 	}
 }
 
