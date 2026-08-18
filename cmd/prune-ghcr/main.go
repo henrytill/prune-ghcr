@@ -85,18 +85,12 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	outputs := []struct {
-		name  string
-		value int
-	}{
-		{"deleted", result.Deleted},
-		{"kept", result.Kept},
-		{"failed", result.Failed},
-	}
-	for _, output := range outputs {
-		if err := actions.SetOutput(output.name, strconv.Itoa(output.value)); err != nil {
-			return err
-		}
+	if err := errors.Join(
+		actions.SetOutput("deleted", strconv.Itoa(result.Deleted)),
+		actions.SetOutput("kept", strconv.Itoa(result.Kept)),
+		actions.SetOutput("failed", strconv.Itoa(result.Failed)),
+	); err != nil {
+		return err
 	}
 
 	if result.Failed > 0 {
