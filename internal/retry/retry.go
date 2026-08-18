@@ -34,16 +34,16 @@ type DelayedError struct {
 
 func (e *DelayedError) Error() string { return e.Message }
 
-// IsRetryableStatus reports whether a request that returned status is worth
+// isRetryableStatus reports whether a request that returned status is worth
 // retrying.
-func IsRetryableStatus(status int) bool {
+func isRetryableStatus(status int) bool {
 	return status == 408 || status == 429 || status >= 500
 }
 
 // NewStatusError builds an error for a failed request, marking it retryable or
 // not by status.
 func NewStatusError(message string, status int) error {
-	if IsRetryableStatus(status) {
+	if isRetryableStatus(status) {
 		return errors.New(message)
 	}
 	return &NonRetryableError{Message: message}

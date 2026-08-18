@@ -119,13 +119,13 @@ func TestWaitsOutADelayedErrorsOwnDelay(t *testing.T) {
 
 func TestTreatsTransientStatusesAsRetryableAndTheRestAsPermanent(t *testing.T) {
 	for _, status := range []int{500, 502, 429, 408} {
-		if !IsRetryableStatus(status) {
-			t.Errorf("IsRetryableStatus(%d) = false, want true", status)
+		if !isRetryableStatus(status) {
+			t.Errorf("isRetryableStatus(%d) = false, want true", status)
 		}
 	}
 	for _, status := range []int{403, 404, 400} {
-		if IsRetryableStatus(status) {
-			t.Errorf("IsRetryableStatus(%d) = true, want false", status)
+		if isRetryableStatus(status) {
+			t.Errorf("isRetryableStatus(%d) = true, want false", status)
 		}
 	}
 
