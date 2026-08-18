@@ -27,8 +27,8 @@ const packageType = "container"
 // pageSize is the maximum the versions endpoint allows.
 const pageSize = 100
 
-// Timeout bounds a single request.
-const Timeout = 30 * time.Second
+// timeout bounds a single request.
+const timeout = 30 * time.Second
 
 // Target identifies the package to operate on.
 //
@@ -68,7 +68,7 @@ func NewClient(token, baseURL string, warn func(string)) (*Client, error) {
 	// and retry.
 	options := []github.ClientOptionsFunc{
 		github.WithAuthToken(token),
-		github.WithTimeout(Timeout),
+		github.WithTimeout(timeout),
 	}
 	if baseURL != "" {
 		options = append(options, github.WithEnterpriseURLs(baseURL, baseURL))
