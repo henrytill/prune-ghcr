@@ -18,6 +18,18 @@ const (
 	manifestMediaType = "application/vnd.oci.image.manifest.v1+json"
 )
 
+// childlessManifest is a single-platform manifest, which most of these tests
+// only need the registry to return something valid for.
+const childlessManifest = `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `"}`
+
+// serveManifest answers every manifest request with one body.
+func serveManifest(mediaType, body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", mediaType)
+		_, _ = w.Write([]byte(body))
+	}
+}
+
 // registryServer stands in for ghcr.io. It answers the /v2/ ping and the token
 // endpoint that go-containerregistry negotiates before any manifest read, and
 // hands manifest requests to handler.
@@ -70,16 +82,15 @@ func newTestClient(t *testing.T, server *httptest.Server, owner, packageName str
 }
 
 func TestLowercasesTheRepositoryPath(t *testing.T) {
-	body := `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `"}`
 	var path string
+	serve := serveManifest(manifestMediaType, childlessManifest)
 	server := registryServer(t, func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
-		w.Header().Set("Content-Type", manifestMediaType)
-		_, _ = w.Write([]byte(body))
+		serve(w, r)
 	})
 
 	client := newTestClient(t, server, "HenryTill", "Devcontainer-Debian")
-	if _, err := client.ReadManifest(context.Background(), digestOf(body)); err != nil {
+	if _, err := client.ReadManifest(context.Background(), digestOf(childlessManifest)); err != nil {
 		t.Fatalf("ReadManifest: %v", err)
 	}
 
@@ -97,10 +108,7 @@ func TestReturnsTheChildrenOfAnIndex(t *testing.T) {
 		{"mediaType":"` + manifestMediaType + `","digest":"` + other + `","size":1}
 	]}`
 
-	server := registryServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", indexMediaType)
-		_, _ = w.Write([]byte(index))
-	})
+	server := registryServer(t, serveManifest(indexMediaType, index))
 
 	client := newTestClient(t, server, "henrytill", "p")
 	children, err := client.ReadManifest(context.Background(), digestOf(index))
@@ -118,10 +126,7 @@ func TestReturnsTheChildrenOfAnIndex(t *testing.T) {
 // erroring, so its version is simply kept.
 func TestASinglePlatformManifestHasNoChildren(t *testing.T) {
 	body := `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `","layers":[]}`
-	server := registryServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", manifestMediaType)
-		_, _ = w.Write([]byte(body))
-	})
+	server := registryServer(t, serveManifest(manifestMediaType, body))
 
 	client := newTestClient(t, server, "henrytill", "p")
 	children, err := client.ReadManifest(context.Background(), digestOf(body))
@@ -182,19 +187,15 @@ func TestRetriesATransientStatusOnlyThroughTheSharedBackoff(t *testing.T) {
 // TestReusesTheAuthHandshakeAcrossReads guards the shared puller: the ping
 // and token exchange happen once per client, not once per manifest.
 func TestReusesTheAuthHandshakeAcrossReads(t *testing.T) {
-	body := `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `"}`
 	pings := 0
 	server := registryServerWithPing(t, func(w http.ResponseWriter, _ *http.Request) {
 		pings++
 		w.WriteHeader(http.StatusOK)
-	}, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", manifestMediaType)
-		_, _ = w.Write([]byte(body))
-	})
+	}, serveManifest(manifestMediaType, childlessManifest))
 
 	client := newTestClient(t, server, "henrytill", "p")
 	for range 2 {
-		if _, err := client.ReadManifest(context.Background(), digestOf(body)); err != nil {
+		if _, err := client.ReadManifest(context.Background(), digestOf(childlessManifest)); err != nil {
 			t.Fatalf("ReadManifest: %v", err)
 		}
 	}
@@ -208,7 +209,6 @@ func TestReusesTheAuthHandshakeAcrossReads(t *testing.T) {
 // failed handshake, so without the reset every retry would replay the failure
 // from the cache and never reach the network again.
 func TestRetriesAFailedAuthHandshake(t *testing.T) {
-	body := `{"schemaVersion":2,"mediaType":"` + manifestMediaType + `"}`
 	pings := 0
 	server := registryServerWithPing(t, func(w http.ResponseWriter, _ *http.Request) {
 		pings++
@@ -217,13 +217,10 @@ func TestRetriesAFailedAuthHandshake(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-	}, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", manifestMediaType)
-		_, _ = w.Write([]byte(body))
-	})
+	}, serveManifest(manifestMediaType, childlessManifest))
 
 	client := newTestClient(t, server, "henrytill", "p")
-	if _, err := client.ReadManifest(context.Background(), digestOf(body)); err != nil {
+	if _, err := client.ReadManifest(context.Background(), digestOf(childlessManifest)); err != nil {
 		t.Fatalf("ReadManifest: %v", err)
 	}
 
