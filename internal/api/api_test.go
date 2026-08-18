@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -298,6 +299,33 @@ func TestDoesNotWaitOutALongRateLimit(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("made %d requests, want 1: a distant reset must not be retried", calls)
+	}
+	// The message is rewritten to explain the refusal, so the typed error is
+	// the only thing left that says which limit was hit.
+	var rateLimited *github.RateLimitError
+	if !errors.As(err, &rateLimited) {
+		t.Errorf("error = %v, want the *github.RateLimitError still reachable", err)
+	}
+}
+
+// TestKeepsTheGitHubErrorReachable guards the boundary statusError sits on: a
+// caller that has to tell a missing package from a missing version sees the
+// same 404 either way, and only the typed error carries the difference.
+func TestKeepsTheGitHubErrorReachable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+	}))
+	defer server.Close()
+
+	_, err := newTestClient(t, server, nil).AuthenticatedLogin(context.Background())
+
+	var errorResponse *github.ErrorResponse
+	if !errors.As(err, &errorResponse) {
+		t.Fatalf("error = %v, want the *github.ErrorResponse reachable", err)
+	}
+	if got := errorResponse.Response.StatusCode; got != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", got)
 	}
 }
 

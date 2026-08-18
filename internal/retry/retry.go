@@ -16,12 +16,17 @@ const DefaultAttempts = 3
 const DefaultBaseDelay = 2 * time.Second
 
 // NonRetryableError is an error that retrying cannot fix, such as a 403 from
-// the API.
+// the API. Err is the library error it was built from, so a caller that needs
+// to tell two failures with the same status apart can still errors.As its way
+// down to the typed error; it may be nil when there was no such error.
 type NonRetryableError struct {
 	Message string
+	Err     error
 }
 
 func (e *NonRetryableError) Error() string { return e.Message }
+
+func (e *NonRetryableError) Unwrap() error { return e.Err }
 
 // DelayedError is a retryable error that knows how long the next attempt
 // should wait, such as a rate limit carrying its own reset time. Do waits the
@@ -30,9 +35,14 @@ func (e *NonRetryableError) Error() string { return e.Message }
 type DelayedError struct {
 	Message string
 	Delay   time.Duration
+	// Err is the library error this was built from, kept for the reason
+	// NonRetryableError keeps its own.
+	Err error
 }
 
 func (e *DelayedError) Error() string { return e.Message }
+
+func (e *DelayedError) Unwrap() error { return e.Err }
 
 // isRetryableStatus reports whether a request that returned status is worth
 // retrying.
@@ -40,13 +50,14 @@ func isRetryableStatus(status int) bool {
 	return status == 408 || status == 429 || status >= 500
 }
 
-// NewStatusError builds an error for a failed request, marking it retryable or
-// not by status.
-func NewStatusError(message string, status int) error {
+// NewStatusError marks a failed request retryable or not by status, keeping
+// err reachable through errors.As either way: a retryable status returns err
+// itself, and the rest wrap it.
+func NewStatusError(err error, status int) error {
 	if isRetryableStatus(status) {
-		return errors.New(message)
+		return err
 	}
-	return &NonRetryableError{Message: message}
+	return &NonRetryableError{Message: err.Error(), Err: err}
 }
 
 // Options configures a call to Do. Build it with Backoff.Options so the

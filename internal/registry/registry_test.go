@@ -4,11 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 
 	"github.com/henrytill/prune-ghcr/internal/retry"
 )
@@ -226,6 +229,29 @@ func TestRetriesAFailedAuthHandshake(t *testing.T) {
 
 	if pings != 2 {
 		t.Errorf("made %d handshakes, want 2: the cached failure must not be replayed", pings)
+	}
+}
+
+// TestKeepsTheTransportErrorReachable guards the boundary classify sits on: a
+// 404 for a manifest that never existed and one for a repository the token
+// cannot see arrive as the same status, and only the typed error carries the
+// registry's own error code.
+func TestKeepsTheTransportErrorReachable(t *testing.T) {
+	server := registryServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"errors":[{"code":"MANIFEST_UNKNOWN"}]}`))
+	})
+
+	client := newTestClient(t, server, "henrytill", "p")
+
+	_, err := client.ReadManifest(context.Background(), "sha256:"+strings.Repeat("a", 64))
+
+	var transportErr *transport.Error
+	if !errors.As(err, &transportErr) {
+		t.Fatalf("error = %v, want the *transport.Error reachable", err)
+	}
+	if got := transportErr.StatusCode; got != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", got)
 	}
 }
 
