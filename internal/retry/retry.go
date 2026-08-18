@@ -53,6 +53,13 @@ func isRetryableStatus(status int) bool {
 // NewStatusError marks a failed request retryable or not by status, keeping
 // err reachable through errors.As either way: a retryable status returns err
 // itself, and the rest wrap it.
+//
+// err must be non-nil. A nil one panics on the wrapping path and is returned
+// as a success on the retryable path, and neither is guarded on purpose: every
+// caller classifies an error it has already found to be non-nil, so a nil here
+// means a request reported failure without saying how. A guard would have to
+// invent an error to stand in for the one that went missing, which buries the
+// bug at the only place that still knows where it happened.
 func NewStatusError(err error, status int) error {
 	if isRetryableStatus(status) {
 		return err
