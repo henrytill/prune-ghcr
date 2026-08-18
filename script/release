@@ -88,25 +88,28 @@ package="${GITHUB_REPOSITORY##*/}"
 package="${package:-prune-ghcr}"
 
 # The packages API names each version by its digest and lists the tags it
-# carries, so one query answers both halves of the question. The two failures
-# are distinct and worth reporting separately: a digest that was never published
-# is a different mistake from one whose tag has since moved on.
-if ! published=$(gh api --paginate \
+# carries, so one query answers both halves of the question -- fetched once, as
+# the whole version object, rather than walking every page twice for one field
+# each. The failures below are distinct and worth reporting separately: a digest
+# that was never published is a different mistake from one whose tag has since
+# moved on.
+#
+# `tojson` because --paginate applies the filter per page and concatenates: one
+# compact line per match, nothing for the pages that do not have it.
+if ! version=$(gh api --paginate \
 	"user/packages/container/${package}/versions" \
-	--jq ".[] | select(.name == \"$pinned_digest\") | .name" 2>/dev/null); then
+	--jq ".[] | select(.name == \"$pinned_digest\") | tojson" 2>/dev/null); then
 	echo -e "${BOLD_RED}Could not query the packages API${OFF} (is gh authenticated?)"
 	exit 1
 fi
 
-if [[ -z $published ]]; then
+if [[ -z $version ]]; then
 	echo -e "${BOLD_RED}No published image has digest${OFF} $pinned_digest"
 	echo -e "Run the ${BOLD_PURPLE}Publish Image${OFF} workflow and merge the pull request it opens"
 	exit 1
 fi
 
-version_tags=$(gh api --paginate \
-	"user/packages/container/${package}/versions" \
-	--jq ".[] | select(.name == \"$pinned_digest\") | .metadata.container.tags[]" 2>/dev/null)
+version_tags=$(jq -r '.metadata.container.tags[]?' <<<"$version")
 
 if [[ -z $version_tags ]]; then
 	echo -e "${BOLD_RED}The image action.yml references carries no tags${OFF}"
