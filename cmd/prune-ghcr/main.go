@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/henrytill/prune-ghcr/internal/actions"
 	"github.com/henrytill/prune-ghcr/internal/api"
@@ -39,12 +38,7 @@ func run(ctx context.Context) error {
 	// empty token is then a misconfiguration rather than an opt-out -- every
 	// consuming repo is expected to hold a PAT -- so fail here instead of
 	// leaving a green run that stopped pruning.
-	token := strings.Map(func(r rune) rune {
-		if unicode.IsSpace(r) {
-			return -1
-		}
-		return r
-	}, actions.Input("token"))
+	token := strings.Join(strings.Fields(actions.Input("token")), "")
 	if token == "" {
 		return errors.New("token input is empty (is the PAT secret set?)")
 	}
