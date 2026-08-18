@@ -41,16 +41,6 @@ jobs:
           # its commit date need it present.
           fetch-depth: 0
 
-      # Read rather than restated. buildx and buildkit decide the bytes a build
-      # produces, so a rebuild has to use what publishing used; a third hardcoded
-      # copy of the pins is a copy that can be missed by a bump, and the rebuild
-      # would then report the mismatch as if the build were nondeterministic.
-      # script/verify-digest's build-input diff covers publish-image.yml, so its
-      # pins at HEAD are the pins the image was built with.
-      - name: Read the builder pins publishing uses
-        id: pins
-        run: script/builder-pins >>"$GITHUB_OUTPUT"
-
       # The script routes its own results: `changed` to GITHUB_OUTPUT, since it
       # gates the steps below, and the rebuild's inputs to GITHUB_ENV.
       - name: Plan the verification
@@ -59,10 +49,24 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: script/verify-digest "$BASE"
 
-      # After the plan, and skipped with it. The plan used to need buildx, to
-      # read the revision label off the published image; script/image-revision
-      # asks the registry now, so the only thing left that needs a builder is
-      # the rebuild - which most pull requests do not do.
+      # Read rather than restated. buildx and buildkit decide the bytes a build
+      # produces, so a rebuild has to use what publishing used; a third hardcoded
+      # copy of the pins is a copy that can be missed by a bump, and the rebuild
+      # would then report the mismatch as if the build were nondeterministic.
+      # script/verify-digest's build-input diff covers publish-image.yml, so its
+      # pins at HEAD are the pins the image was built with.
+      #
+      # After the plan, and skipped with it: the only consumer is the buildx
+      # step below, which most pull requests do not reach.
+      - name: Read the builder pins publishing uses
+        id: pins
+        if: steps.plan.outputs.changed == 'true'
+        run: script/builder-pins >>"$GITHUB_OUTPUT"
+
+      # The plan used to need buildx, to read the revision label off the
+      # published image; script/image-revision asks the registry now, so the
+      # only thing left that needs a builder is the rebuild - which most pull
+      # requests do not do.
       - name: Set Up Buildx
         id: buildx
         if: steps.plan.outputs.changed == 'true'
