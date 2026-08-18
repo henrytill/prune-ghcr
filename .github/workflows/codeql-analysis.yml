@@ -21,6 +21,12 @@ jobs:
     name: Analyze
     runs-on: ubuntu-latest
 
+    # A matrix over one language, in a Go-only repository, and it has to stay.
+    # The matrix is what makes the reported check `Analyze (go)`; without it the
+    # job reports as plain `Analyze`, and `Analyze (go)` is a required context in
+    # the `main` ruleset. Dropping it does not fail the check - it means the
+    # required check never reports at all, and every pull request waits forever
+    # on a status that is not coming.
     strategy:
       fail-fast: false
       matrix:
