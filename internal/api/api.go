@@ -194,23 +194,27 @@ func (c *Client) listPage(
 // DeleteVersion deletes one version of a package by id.
 func (c *Client) DeleteVersion(ctx context.Context, target Target, id int64) error {
 	_, err := retry.Do(ctx, func(ctx context.Context) (struct{}, error) {
-		var response *github.Response
-		var err error
-		if target.UserOwned {
-			// The empty user means the authenticated user, which is the
-			// /user/packages path.
-			response, err = c.github.Users.PackageDeleteVersion(ctx, "", packageType,
-				target.PackageName, id)
-		} else {
-			response, err = c.github.Organizations.PackageDeleteVersion(ctx, target.Owner,
-				packageType, target.PackageName, id)
-		}
+		response, err := c.deleteVersion(ctx, target, id)
 		if err != nil {
 			return struct{}{}, statusError(response, err)
 		}
 		return struct{}{}, nil
 	}, c.backoff.Options(fmt.Sprintf("delete version %d", id)))
 	return err
+}
+
+// deleteVersion dispatches to the user or organization endpoint, as listPage
+// does for the read side.
+func (c *Client) deleteVersion(
+	ctx context.Context, target Target, id int64,
+) (*github.Response, error) {
+	if target.UserOwned {
+		// The empty user means the authenticated user, which is the
+		// /user/packages path.
+		return c.github.Users.PackageDeleteVersion(ctx, "", packageType, target.PackageName, id)
+	}
+	return c.github.Organizations.PackageDeleteVersion(ctx, target.Owner, packageType,
+		target.PackageName, id)
 }
 
 // convert flattens a go-github package version.
