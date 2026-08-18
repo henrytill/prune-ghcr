@@ -21,9 +21,9 @@ const testPrefix = "/api/v3"
 
 // newTestClient points a client at a test server, with the retry backoff
 // turned off so a retry does not sleep.
-func newTestClient(t *testing.T, server *httptest.Server) *Client {
+func newTestClient(t *testing.T, server *httptest.Server, warn func(string)) *Client {
 	t.Helper()
-	client, err := NewClient("tok", server.URL+"/", nil)
+	client, err := NewClient("tok", server.URL+"/", warn)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestSendsTheToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	login, err := newTestClient(t, server).AuthenticatedLogin(context.Background())
+	login, err := newTestClient(t, server, nil).AuthenticatedLogin(context.Background())
 	if err != nil {
 		t.Fatalf("AuthenticatedLogin: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestUsesTheUserPathWhenTheTokenOwnsThePackage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newTestClient(t, server)
+	client := newTestClient(t, server, nil)
 	target := Target{Owner: "henrytill", PackageName: "p", UserOwned: true}
 
 	if _, err := client.ListVersions(context.Background(), target); err != nil {
@@ -188,7 +188,7 @@ func TestUsesTheOrgsPathForAPackageOwnedBySomeoneElse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newTestClient(t, server)
+	client := newTestClient(t, server, nil)
 	target := Target{Owner: "some-org", PackageName: "p"}
 
 	if _, err := client.ListVersions(context.Background(), target); err != nil {
@@ -219,7 +219,7 @@ func TestFollowsPaginationToTheLastPage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	versions, err := newTestClient(t, server).ListVersions(context.Background(),
+	versions, err := newTestClient(t, server, nil).ListVersions(context.Background(),
 		Target{Owner: "henrytill", PackageName: "p", UserOwned: true})
 	if err != nil {
 		t.Fatalf("ListVersions: %v", err)
@@ -240,7 +240,7 @@ func TestFailsOnAnErrorStatusIncludingTheBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := newTestClient(t, server).AuthenticatedLogin(context.Background())
+	_, err := newTestClient(t, server, nil).AuthenticatedLogin(context.Background())
 
 	if err == nil {
 		t.Fatal("error = nil, want a failure")
@@ -272,7 +272,7 @@ func TestRetriesARateLimit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	login, err := newTestClient(t, server).AuthenticatedLogin(context.Background())
+	login, err := newTestClient(t, server, nil).AuthenticatedLogin(context.Background())
 	if err != nil {
 		t.Fatalf("AuthenticatedLogin: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestDoesNotWaitOutALongRateLimit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := newTestClient(t, server).AuthenticatedLogin(context.Background())
+	_, err := newTestClient(t, server, nil).AuthenticatedLogin(context.Background())
 
 	if err == nil || !strings.Contains(err.Error(), "not waiting") {
 		t.Fatalf("error = %v, want one mentioning not waiting", err)
@@ -320,7 +320,7 @@ func TestDoesNotRetryAPermanentFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := newTestClient(t, server).AuthenticatedLogin(context.Background())
+	_, err := newTestClient(t, server, nil).AuthenticatedLogin(context.Background())
 
 	if err == nil {
 		t.Fatal("error = nil, want a failure")
@@ -343,12 +343,8 @@ func TestRetriesATransientFailure(t *testing.T) {
 	defer server.Close()
 
 	var warnings []string
-	client, err := NewClient("tok", server.URL+"/",
+	client := newTestClient(t, server,
 		func(message string) { warnings = append(warnings, message) })
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
-	client.backoff.BaseDelay = 0
 
 	login, err := client.AuthenticatedLogin(context.Background())
 	if err != nil {
