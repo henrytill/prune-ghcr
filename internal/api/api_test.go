@@ -141,68 +141,57 @@ func TestSendsTheToken(t *testing.T) {
 	}
 }
 
-// TestUsesTheUserPathWhenTheTokenOwnsThePackage guards the reason the
-// user/organization split exists: /user is the only path that can delete
-// versions of a user-owned package.
-func TestUsesTheUserPathWhenTheTokenOwnsThePackage(t *testing.T) {
-	var listed, deleted string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodDelete {
-			deleted = r.URL.Path
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		listed = r.URL.Path
-		_, _ = w.Write([]byte(`[]`))
-	}))
-	defer server.Close()
-
-	client := newTestClient(t, server, nil)
-	target := Target{Owner: "henrytill", PackageName: "p", UserOwned: true}
-
-	if _, err := client.ListVersions(context.Background(), target); err != nil {
-		t.Fatalf("ListVersions: %v", err)
-	}
-	if err := client.DeleteVersion(context.Background(), target, 7); err != nil {
-		t.Fatalf("DeleteVersion: %v", err)
+// TestSelectsTheEndpointFamilyByOwnership guards the reason the split exists:
+// /user is the only path that can delete versions of a user-owned package.
+func TestSelectsTheEndpointFamilyByOwnership(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     Target
+		wantListed string
+	}{
+		{
+			name:       "user-owned",
+			target:     Target{Owner: "henrytill", PackageName: "p", UserOwned: true},
+			wantListed: testPrefix + "/user/packages/container/p/versions",
+		},
+		{
+			name:       "organization-owned",
+			target:     Target{Owner: "some-org", PackageName: "p"},
+			wantListed: testPrefix + "/orgs/some-org/packages/container/p/versions",
+		},
 	}
 
-	if want := testPrefix + "/user/packages/container/p/versions"; listed != want {
-		t.Errorf("listed %q, want %q", listed, want)
-	}
-	if want := testPrefix + "/user/packages/container/p/versions/7"; deleted != want {
-		t.Errorf("deleted %q, want %q", deleted, want)
-	}
-}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var listed, deleted string
+			server := httptest.NewServer(http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodDelete {
+						deleted = r.URL.Path
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
+					listed = r.URL.Path
+					_, _ = w.Write([]byte(`[]`))
+				}))
+			defer server.Close()
 
-func TestUsesTheOrgsPathForAPackageOwnedBySomeoneElse(t *testing.T) {
-	var listed, deleted string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodDelete {
-			deleted = r.URL.Path
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		listed = r.URL.Path
-		_, _ = w.Write([]byte(`[]`))
-	}))
-	defer server.Close()
+			client := newTestClient(t, server, nil)
 
-	client := newTestClient(t, server, nil)
-	target := Target{Owner: "some-org", PackageName: "p"}
+			if _, err := client.ListVersions(context.Background(), test.target); err != nil {
+				t.Fatalf("ListVersions: %v", err)
+			}
+			if err := client.DeleteVersion(context.Background(), test.target, 7); err != nil {
+				t.Fatalf("DeleteVersion: %v", err)
+			}
 
-	if _, err := client.ListVersions(context.Background(), target); err != nil {
-		t.Fatalf("ListVersions: %v", err)
-	}
-	if err := client.DeleteVersion(context.Background(), target, 7); err != nil {
-		t.Fatalf("DeleteVersion: %v", err)
-	}
-
-	if want := testPrefix + "/orgs/some-org/packages/container/p/versions"; listed != want {
-		t.Errorf("listed %q, want %q", listed, want)
-	}
-	if want := testPrefix + "/orgs/some-org/packages/container/p/versions/7"; deleted != want {
-		t.Errorf("deleted %q, want %q", deleted, want)
+			if listed != test.wantListed {
+				t.Errorf("listed %q, want %q", listed, test.wantListed)
+			}
+			if want := test.wantListed + "/7"; deleted != want {
+				t.Errorf("deleted %q, want %q", deleted, want)
+			}
+		})
 	}
 }
 
