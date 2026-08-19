@@ -1,8 +1,9 @@
 # AGENTS.md
 
-This file provides guidance to coding agents working in this repository. Claude
-Code reads it as `CLAUDE.md`, which is git-ignored and symlinked here, so there
-is one set of instructions rather than one per agent.
+This file provides guidance to coding agents working in this repository, and is
+the only tracked copy of it. `CLAUDE.md` is ignored rather than tracked, so a
+clone starts without it; recreate the link with `ln -s AGENTS.md CLAUDE.md` for
+an agent that looks for that name.
 
 ## Overview
 
