@@ -85,7 +85,11 @@ func run(ctx context.Context) error {
 		return err
 	}
 
+	// total is what makes a dry run legible: it reports deleted and failed as
+	// zero whatever it found, so total minus kept is the only thing that says
+	// how much a real run would have removed.
 	if err := errors.Join(
+		actions.SetOutput("total", strconv.Itoa(result.Total)),
 		actions.SetOutput("deleted", strconv.Itoa(result.Deleted)),
 		actions.SetOutput("kept", strconv.Itoa(result.Kept)),
 		actions.SetOutput("failed", strconv.Itoa(result.Failed)),

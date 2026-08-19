@@ -43,7 +43,9 @@ type Options struct {
 	DryRun bool
 }
 
-// Result counts what was kept, deleted, and failed to delete.
+// Result counts every version considered, and what was kept, deleted, and
+// failed to delete. Deleted and Failed stay zero in a dry run, so Total is what
+// a caller subtracts Kept from to learn what a real run would have removed.
 type Result struct {
 	Total   int
 	Kept    int

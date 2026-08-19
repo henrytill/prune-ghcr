@@ -61,9 +61,13 @@ fails the run rather than silently skipping the prune.
 
 | Output    | Description                               |
 | --------- | ----------------------------------------- |
+| `total`   | Number of versions considered.            |
 | `deleted` | Number of versions deleted.               |
 | `kept`    | Number of versions kept.                  |
 | `failed`  | Number of versions that failed to delete. |
+
+A dry run reports `deleted` and `failed` as `0` whatever it found, since it
+deletes nothing. `total` minus `kept` is what it would have deleted.
 
 A failed delete does not stop the run — the remaining versions are still
 attempted — but the run fails at the end. A tagged manifest that cannot be read
