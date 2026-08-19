@@ -18,6 +18,8 @@ Ensure you adhere to the following guidelines when creating release notes:
 - Ensure that the release notes are easy to read and navigate
 - Include relevant issue or PR numbers where applicable
 - Use proper Markdown formatting
+- Put each paragraph on one line, however long: release notes are rendered with
+  hard line breaks, so a wrapped paragraph becomes ragged short lines
 - Use code blocks for commands, configuration examples, or code changes
 - Use note and warning callouts for important information
 
