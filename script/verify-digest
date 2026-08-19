@@ -49,18 +49,19 @@ fi
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$(git -C "$here" rev-parse --show-toplevel)"
 
-# The last two are here because they decide the bytes a build produces as much
-# as the Dockerfile does: publish-image.yml holds the buildx and buildkit pins,
-# and the build-image action holds the platforms, the timestamp rewriting, the
-# media types and the build-push-action version. Either one changed between
-# publishing and merging would otherwise fail verification on an image that
-# reproduces perfectly.
+# The last three are here because they decide the bytes a build produces as much
+# as the Dockerfile does: builder-pins.env holds the buildx and buildkit pins,
+# publish-image.yml holds what publishing passes the build, and the build-image
+# action holds the platforms, the timestamp rewriting, the media types and the
+# build-push-action version. Any of them changed between publishing and merging
+# would otherwise fail verification on an image that reproduces perfectly.
 build_inputs=(
 	cmd
 	internal
 	go.mod
 	go.sum
 	Dockerfile
+	.github/builder-pins.env
 	.github/workflows/publish-image.yml
 	.github/actions/build-image/action.yml
 )

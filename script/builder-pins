@@ -6,27 +6,39 @@ set -e
 
 # About:
 #
-# Prints the buildx and buildkit versions publish-image.yml pins, as key=value
-# lines:
+# Prints .github/builder-pins.env without its comments, as key=value lines a
+# workflow can append to $GITHUB_OUTPUT:
 #
-#   BUILDX_VERSION=v0.36.1
 #   BUILDKIT_IMAGE=moby/buildkit:v0.32.2@sha256:...
+#   BUILDX_VERSION=v0.36.1
 #
-# Both decide the bytes a build produces, so anything rebuilding a published
-# image has to use the same ones. Restating them is how they drift: a bump that
-# missed one copy would leave a rebuild running an older buildkit and reporting
-# the resulting mismatch as if the build were nondeterministic.
+# The file is the declaration and this is the reader, which is all that is left
+# of a script that used to recover these by matching patterns against
+# publish-image.yml. That parse could return the wrong step's version and exit
+# zero, and the consumers would then rebuild with a builder no publish used and
+# report the difference as if the image were nondeterministic.
 #
-# publish-image.yml is the source of truth because it is the workflow that
-# actually publishes. It is also on the build-input list in script/verify-digest,
-# so a pull request cannot change these without the diff there noticing.
+# Both keys are checked because a missing one is the same silent failure: an
+# empty BUILDKIT_IMAGE leaves driver-opts naming nothing, and the builder falls
+# back to the mutable `moby/buildkit:buildx-stable-1`.
+#
+# Reading at a ref is why this exists at all rather than a `cat` in each
+# workflow: docs/releasing.md has someone reproducing a published image by hand
+# read the pins at the commit being reproduced.
+#
+# With a key, it prints that one value and nothing else, the way
+# script/layout-digest and script/pinned-image do. Callers wanting one pin would
+# otherwise cut it out of the pair themselves and guard against the empty string
+# themselves, which is a check to forget in each of them.
 #
 # Usage:
 #
-# script/builder-pins [<ref>]
+# script/builder-pins [<ref> [<key>]]
 
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$(git -C "$here" rev-parse --show-toplevel)"
+
+pins_file=.github/builder-pins.env
 
 ref="${1-HEAD}"
 
@@ -39,16 +51,76 @@ if [[ -z $ref ]]; then
 	exit 2
 fi
 
-workflow=$(git show "${ref}:.github/workflows/publish-image.yml")
+# Read first, then filtered: in one pipeline the status would be grep's, and
+# a bad ref would arrive as a missing key rather than as git saying so.
+raw=$(git show "${ref}:${pins_file}")
+pins=$(grep -vE '^[[:space:]]*(#|$)' <<<"$raw" || true)
 
-version=$(echo "$workflow" | sed -nE 's|^ *version: (v[0-9.]+) *$|\1|p' | head -1)
-image=$(echo "$workflow" |
-	sed -nE 's|^ *image=(moby/buildkit:.+@sha256:[0-9a-f]{64}) *$|\1|p' | head -1)
+keys=(BUILDKIT_IMAGE BUILDX_VERSION)
+values=()
 
-if [[ -z $version || -z $image ]]; then
-	echo "no builder pins in publish-image.yml at ${ref}" >&2
-	exit 1
+# Everything below is about what reaches $GITHUB_OUTPUT, which takes whatever it
+# is given: an unrecognised line is answered with GitHub's "Invalid format"
+# naming nothing, a repeated key is resolved by keeping the last one silently,
+# and a value with a space in it arrives at buildx as a value with a space in
+# it. So the two keys are found, checked, and printed back in a form this script
+# constructed, rather than the file's lines being passed along.
+allowed=$(
+	IFS='|'
+	echo "${keys[*]}"
+)
+
+while IFS= read -r line; do
+	if [[ -n $line && ! $line =~ ^(${allowed})= ]]; then
+		echo "unexpected line in ${pins_file} at ${ref}: ${line}" >&2
+		exit 1
+	fi
+done <<<"$pins"
+
+for key in "${keys[@]}"; do
+	mapfile -t found < <(grep -E "^${key}=" <<<"$pins" || true)
+
+	# A bump that adds a line and forgets to delete the old one leaves both, and
+	# a presence check is satisfied by either.
+	if [[ ${#found[@]} -gt 1 ]]; then
+		echo "${key} declared ${#found[@]} times in ${pins_file} at ${ref}" >&2
+		exit 1
+	fi
+
+	value=${found[0]#"${key}="}
+
+	if [[ -z $value ]]; then
+		echo "no ${key} in ${pins_file} at ${ref}" >&2
+		exit 1
+	fi
+
+	# Trailing whitespace survives the read and would reach buildx inside the
+	# value; neither of these is a thing with a space in it.
+	if [[ $value =~ [[:space:]] ]]; then
+		echo "whitespace in ${key} in ${pins_file} at ${ref}" >&2
+		exit 1
+	fi
+
+	values+=("$value")
+done
+
+want="${2-}"
+
+if [[ -z $want ]]; then
+	for i in "${!keys[@]}"; do
+		echo "${keys[i]}=${values[i]}"
+	done
+	exit 0
 fi
 
-echo "BUILDX_VERSION=${version}"
-echo "BUILDKIT_IMAGE=${image}"
+for i in "${!keys[@]}"; do
+	if [[ ${keys[i]} == "$want" ]]; then
+		echo "${values[i]}"
+		exit 0
+	fi
+done
+
+# A key that is not one of the two is the caller's typo, and printing nothing
+# for it would be answered with an empty driver-opt rather than with a question.
+echo "unknown key ${want}" >&2
+exit 2

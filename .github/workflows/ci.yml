@@ -102,10 +102,10 @@ jobs:
         with:
           persist-credentials: false
 
-      # From publish-image.yml, because this job exists to reproduce what that
-      # workflow produces, and buildx and buildkit decide the bytes as much as
-      # the Dockerfile does. Restating them here made a second copy that a bump
-      # could miss, which would show up as this job disagreeing with a publish.
+      # From .github/builder-pins.env, the file publishing reads too, because
+      # buildx and buildkit decide the bytes as much as the Dockerfile does.
+      # Restating them here made a second copy that a bump could miss, which
+      # would show up as this job disagreeing with a publish.
       - name: Read the builder pins publishing uses
         id: pins
         run: script/builder-pins >>"$GITHUB_OUTPUT"

@@ -74,10 +74,10 @@ What gets it there:
 - the Dockerfile frontend pinned by digest, since `# syntax=docker/dockerfile:1`
   resolves to whatever is newest and the frontend decides how layers and the
   image config are produced
-- buildx and buildkit pinned on both workflows, through `version` and a
-  `driver-opts: image=moby/buildkit:...@sha256:...` — the SHA on
-  `setup-buildx-action` pins the action, which by default installs the newest
-  buildx and runs the mutable `moby/buildkit:buildx-stable-1`
+- buildx and buildkit pinned in `.github/builder-pins.env`, which every workflow
+  that sets up a builder reads — the SHA on `setup-buildx-action` pins the
+  action, which by default installs the newest buildx and runs the mutable
+  `moby/buildkit:buildx-stable-1`
 - `provenance: false`, since an attestation records the time it was made
 - `SOURCE_DATE_EPOCH`, taken from the commit date — the one clock a third party
   rebuilding that commit also has
@@ -157,10 +157,19 @@ git checkout <that revision>
 rev=$(git rev-parse HEAD)
 
 # The default docker driver cannot build more than one platform at a time, and
-# the buildkit version is a build input, so use the one publish-image.yml pins
-# at the commit checked out above rather than the one written here.
-docker buildx create --use --driver docker-container \
-  --driver-opt image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+# the buildkit version is a build input, so take the pin from the commit checked
+# out above rather than from a copy written into this file. That is what the ref
+# argument is for; the key argument makes the script fail rather than print an
+# empty line, which as an empty --driver-opt would silently run the mutable
+# buildx-stable-1. Chained, since this is pasted into a shell with no `set -e`.
+#
+# The checkout above means this runs the script as it was at that revision. For
+# an image published before the pins moved into .github/builder-pins.env, there
+# is no key argument and no file: read the pins off the Set Up Buildx step in
+# .github/workflows/publish-image.yml at that revision instead.
+buildkit=$(script/builder-pins "$rev" BUILDKIT_IMAGE) &&
+  docker buildx create --use --driver docker-container \
+    --driver-opt "image=${buildkit}"
 
 # These flags have to match .github/actions/build-image, which is what every
 # build in CI goes through. This block is the one copy of them that nothing
@@ -215,11 +224,13 @@ rev=$(script/image-revision "$image") &&
 # run's layout in place for the comparison below to pass on.
 rm -rf out && mkdir -p out
 
-# The buildkit pin publish-image.yml names -- read it with script/builder-pins at
-# the commit being reproduced rather than trusting the one written here.
-podman run -d --name bk --privileged \
-  -v "$PWD":/src:ro -v "$PWD/out":/out \
-  docker.io/moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+# The buildkit pin, read at the commit being reproduced rather than from a copy
+# written into this file. Chained for the reason given above: an empty pin here
+# starts a container on whatever `latest` is today.
+buildkit=$(script/builder-pins "$rev" BUILDKIT_IMAGE) &&
+  podman run -d --name bk --privileged \
+    -v "$PWD":/src:ro -v "$PWD/out":/out \
+    "docker.io/${buildkit}"
 
 # buildkitd needs a moment to create its socket, and `podman exec` does not wait.
 # Bounded, and checking the container is still up: an unbounded wait on a
