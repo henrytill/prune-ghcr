@@ -117,10 +117,10 @@ What gets it there:
 - the Dockerfile frontend pinned by digest, since `# syntax=docker/dockerfile:1`
   resolves to whatever is newest and the frontend decides how layers and the
   image config are produced
-- buildx and buildkit pinned in `.github/builder-pins.env`, which every workflow
-  that sets up a builder reads — the SHA on `setup-buildx-action` pins the
-  action, which by default installs the newest buildx and runs the mutable
-  `moby/buildkit:buildx-stable-1`
+- buildx and buildkit pinned in `.github/builder-pins.env`, which
+  `.github/actions/setup-builder` reads for every workflow that needs a builder
+  — the SHA on `setup-buildx-action` pins the action, which by default installs
+  the newest buildx and runs the mutable `moby/buildkit:buildx-stable-1`
 - `provenance: false`, since an attestation records the time it was made
 - `SOURCE_DATE_EPOCH`, taken from the commit date — the one clock a third party
   rebuilding that commit also has
@@ -340,10 +340,11 @@ they can be run by hand:
 1. Reads `org.opencontainers.image.revision` back off the image at `D` — call it
    `R`, the commit the image claims to be built from.
 1. `git diff --quiet R HEAD` over the build inputs: `cmd`, `internal`, `go.mod`,
-   `go.sum`, the `Dockerfile`, `publish-image.yml`, where the buildx and
-   buildkit pins live, and the `build-image` action, which holds the rest of the
-   flags a digest is over. Empty means the image at `R` is an image of the
-   source being merged, which is the stale-digest failure caught directly.
+   `go.sum`, the `Dockerfile`, `publish-image.yml`, `builder-pins.env`, the
+   `setup-builder` action, which stands the builder those pins name up, and the
+   `build-image` action, which holds the rest of the flags a digest is over.
+   Empty means the image at `R` is an image of the source being merged, which is
+   the stale-digest failure caught directly.
 1. Rebuilds at this checkout, with `SOURCE_DATE_EPOCH` from `R`'s commit date
    and the revision label set to `R`.
 1. Fails unless the rebuilt digest equals `D`.

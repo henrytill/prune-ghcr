@@ -124,16 +124,19 @@ What CI cannot check, pinning has to cover. Both of its builds resolve the same
 Dockerfile frontend, builder image, buildx and buildkit, so all four are pinned
 by digest — in the `# syntax=` and `FROM` lines, and in
 `.github/builder-pins.env`. The SHA on `setup-buildx-action` pins the action and
-nothing else.
+nothing else, which is why `.github/actions/setup-builder` passes it both.
 
 Everything that is a build input lives in exactly one place, and the rest is
 read from it:
 
-- the buildx and buildkit pins in `.github/builder-pins.env`, read by all three
-  workflows that set up a builder through `script/builder-pins`. A `key=value`
-  file rather than a step some other workflow parses: recovering them from
-  `publish-image.yml` by pattern was a parse that could find another action's
-  `version:` and exit zero
+- the buildx and buildkit pins in `.github/builder-pins.env`, read with
+  `script/builder-pins`. A `key=value` file rather than a step some other
+  workflow parses: recovering them from `publish-image.yml` by pattern was a
+  parse that could find another action's `version:` and exit zero
+- the `setup-buildx-action` SHA, `cache-binary: false` and the read of those
+  pins in `.github/actions/setup-builder`, which all three workflows that need a
+  builder go through. Callers pass only how the builder reaches a registry,
+  which is not a build input
 - the platforms, `provenance`, `rewrite-timestamp`, `oci-mediatypes` and the
   `build-push-action` version in `.github/actions/build-image`, which every
   build goes through
