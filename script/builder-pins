@@ -1,86 +1,115 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
-# Exit early
-# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
-set -e
+"""Print the builder pins publish-image.yml uses, as key=value lines.
 
-# About:
-#
-# Prints the buildx and buildkit versions publish-image.yml pins, as key=value
-# lines:
-#
-#   BUILDX_VERSION=v0.36.1
-#   BUILDKIT_IMAGE=moby/buildkit:v0.32.2@sha256:...
-#
-# Both decide the bytes a build produces, so anything rebuilding a published
-# image has to use the same ones. Restating them is how they drift: a bump that
-# missed one copy would leave a rebuild running an older buildkit and reporting
-# the resulting mismatch as if the build were nondeterministic.
-#
-# publish-image.yml is the source of truth because it is the workflow that
-# actually publishes. It is also on the build-input list in script/verify-digest,
-# so a pull request cannot change these without the diff there noticing.
-#
-# Usage:
-#
-# script/builder-pins [<ref>]
+    BUILDX_VERSION=v0.36.1
+    BUILDKIT_IMAGE=moby/buildkit:v0.32.2@sha256:...
 
-here=$(cd "$(dirname "$0")" && pwd)
-cd "$(git -C "$here" rev-parse --show-toplevel)"
+Both decide the bytes a build produces, so anything rebuilding a
+published image has to use the same ones. Restating them is how they
+drift: a bump that missed one copy would leave a rebuild running an
+older buildkit and reporting the resulting mismatch as if the build were
+nondeterministic.
 
-ref="${1-HEAD}"
+publish-image.yml is the source of truth because it is the workflow that
+actually publishes. It is also on the build-input list in
+script/verify-digest, so a pull request cannot change these without the
+diff there noticing.
 
-# `${1-HEAD}` and not `${1:-HEAD}`: an argument that is present but empty is a
-# caller whose own lookup failed, and defaulting that to HEAD answers a question
-# nobody asked - with the current checkout's commit, which looks entirely
-# plausible and is wrong.
-if [[ -z $ref ]]; then
-	echo "empty ref" >&2
-	exit 2
-fi
+Parsed rather than matched by shape. `version:` is an input plenty of
+other actions take - golangci-lint-action in ci.yml, to name one already
+in this repository - so a scan for the first one in the file finds
+whichever step comes first, and a comment mentioning this step would
+anchor such a scan on whichever step the comment sits in. Both failures
+exit zero: a pattern that matches nothing goes red, but a wrong version
+is believed, and verify-digest.yml would then report a correctly
+published digest as failing to reproduce.
 
-workflow=$(git show "${ref}:.github/workflows/publish-image.yml")
+The buildkit pin stays a pattern match even here, because driver-opts is
+buildx's own `key=value` string and YAML has nothing to say about its
+contents. What parsing buys is finding the step that string belongs to.
 
-# Narrow to the setup-buildx-action step before matching anything by shape.
-#
-# Both patterns below match a line, not a step, and `version:` is an input plenty
-# of other actions take - golangci-lint-action in ci.yml, to name one already in
-# this repository. Adding such a step above Set Up Buildx would have handed both
-# consumers a buildx version belonging to something else, and it would have done
-# it quietly: a pattern that matches nothing exits non-zero, but a pattern that
-# matches the wrong line succeeds, and verify-digest.yml would then report a
-# correctly published digest as failing to reproduce.
-#
-# The whole list item is taken, not the part from `uses:` onwards: YAML does not
-# order mapping keys, so a step writing `with:` above `uses:` still pins what it
-# pins. The anchor is `^ *(- +)?uses:` rather than the action name alone, or a
-# comment mentioning the step - the kind this repository writes constantly -
-# would anchor the block on whatever step the comment happens to sit in.
-step=$(echo "$workflow" | awk '
-	function indent(line) { match(line, /^ */); return RLENGTH }
-	/^ *- / && (!started || indent($0) <= ind) {
-		if (found) { printf "%s", buf; exit }
-		buf = ""; ind = indent($0); started = 1
-	}
-	found && /[^ \t]/ && !/^ *- / && indent($0) < ind { printf "%s", buf; exit }
-	{ buf = buf $0 ORS }
-	/^ *(- +)?uses:[ \t]*docker\/setup-buildx-action@/ { found = 1 }
-	END { if (found) printf "%s", buf }
-')
+PyYAML rather than yq: both are on ubuntu-latest, but this also runs off
+a runner - docs/releasing.md has someone reproducing a published image
+by hand read the pins at the commit being reproduced - and `yq` names
+two different programs, mikefarah's and the python-jq wrapper that
+`apt install yq` installs.
 
-if [[ -z $step ]]; then
-	echo "no docker/setup-buildx-action step in publish-image.yml at ${ref}" >&2
-	exit 1
-fi
+Usage:
 
-version=$(echo "$step" | sed -nE 's|^ *version: (v[0-9.]+) *$|\1|p' | head -1)
-image=$(echo "$step" |
-	sed -nE 's|^ *image=(moby/buildkit:.+@sha256:[0-9a-f]{64}) *$|\1|p' | head -1)
+script/builder-pins [<ref>]
+"""
 
-if [[ -z $version || -z $image ]]; then
-	echo "no builder pins in publish-image.yml at ${ref}" >&2
-	exit 1
-fi
+import os
+import re
+import subprocess
+import sys
 
-echo "BUILDX_VERSION=${version}"
-echo "BUILDKIT_IMAGE=${image}"
+import yaml
+
+WORKFLOW = ".github/workflows/publish-image.yml"
+ACTION = "docker/setup-buildx-action@"
+IMAGE = re.compile(r"\bimage=(moby/buildkit:\S+@sha256:[0-9a-f]{64})")
+VERSION = re.compile(r"v[0-9.]+")
+
+
+def git(*args: str, cwd: str) -> str:
+    """Run git, returning stdout, and exiting with git's own message."""
+    try:
+        done = subprocess.run(
+            ("git", *args),
+            cwd=cwd,
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        sys.stderr.write(error.stderr)
+        sys.exit(error.returncode)
+    return done.stdout
+
+
+def buildx_step(workflow: dict) -> dict:
+    """Return the inputs of the setup-buildx-action step, or {}."""
+    for job in (workflow.get("jobs") or {}).values():
+        for step in job.get("steps") or []:
+            if ACTION in (step.get("uses") or ""):
+                return step.get("with") or {}
+    return {}
+
+
+def main() -> None:
+    """Print the pins, or exit non-zero saying what was not found."""
+    if len(sys.argv) > 2:
+        sys.exit("usage: script/builder-pins [<ref>]")
+
+    # `sys.argv[1:] or ["HEAD"]` and not a default for the empty string:
+    # an argument that is present but empty is a caller whose own lookup
+    # failed, and defaulting that to HEAD answers a question nobody
+    # asked - with the current checkout's commit, which looks entirely
+    # plausible and is wrong.
+    ref = (sys.argv[1:] or ["HEAD"])[0]
+    if not ref:
+        sys.stderr.write("empty ref\n")
+        sys.exit(2)
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = git("rev-parse", "--show-toplevel", cwd=here).strip()
+    workflow = git("show", f"{ref}:{WORKFLOW}", cwd=root)
+    inputs = buildx_step(yaml.safe_load(workflow))
+
+    if not inputs:
+        sys.exit(f"no {ACTION[:-1]} step in publish-image.yml at {ref}")
+
+    version = str(inputs.get("version") or "")
+    image = IMAGE.search(str(inputs.get("driver-opts") or ""))
+
+    if not VERSION.fullmatch(version) or image is None:
+        sys.exit(f"no builder pins in publish-image.yml at {ref}")
+
+    print(f"BUILDX_VERSION={version}")
+    print(f"BUILDKIT_IMAGE={image.group(1)}")
+
+
+if __name__ == "__main__":
+    main()

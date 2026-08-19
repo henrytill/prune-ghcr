@@ -49,6 +49,16 @@ check() {
 	cat >"${dir}/.github/workflows/publish-image.yml"
 	cp "${root}/script/builder-pins" "${dir}/script/builder-pins"
 
+	# A fixture that is not valid YAML tests nothing, and a text scan would
+	# happily read one - the way an earlier version of the inline `- uses:` case
+	# was malformed and passed anyway.
+	if ! python3 -c 'import sys, yaml; yaml.safe_load(sys.stdin)' \
+		<"${dir}/.github/workflows/publish-image.yml" >/dev/null 2>&1; then
+		failures=$((failures + 1))
+		echo "FAIL: ${name} (fixture is not valid YAML)"
+		return 0
+	fi
+
 	git -C "$dir" init -q
 	git -C "$dir" add -A
 	git -C "$dir" \
@@ -146,7 +156,7 @@ check "decoy pins below" 0 "$pins" < <(
 # `uses:` line onto the `-` and so changes where the block starts.
 check "inline uses form" 0 "$pins" < <(
 	preamble
-	buildx_step | sed -E '1d; s|^      (  uses:)|      -\1|; s|^        |          |'
+	buildx_step | sed -E '1d; s|^        uses:|      - uses:|'
 )
 
 # YAML does not order mapping keys, so a step that writes `uses:` last still
