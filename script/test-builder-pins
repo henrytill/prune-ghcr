@@ -17,15 +17,14 @@ set -e
 # as a digest mismatch somewhere else entirely.
 #
 # The cases at the end are the ones that keep the declaration single and
-# consumed: that nothing else carries a copy of the buildkit pin, and that the
-# two files deciding which builder a build runs on are diffed as build inputs.
+# consumed: that nothing else carries a copy of the buildkit pin, that
+# .github/actions/setup-builder is the only thing that stands up a builder, and
+# that everything deciding the bytes is diffed as a build input.
 #
-# There used to be three more, checking that no workflow named the buildx
-# version and that every buildx step kept `cache-binary: false`. There was one
-# buildx step written out in three workflows then, and those greps were how the
-# three were kept the same -- after the fact, once someone had already written
-# the wrong thing. .github/actions/setup-builder is the one step now, so there
-# is nothing left for them to compare.
+# The buildx step used to be written out in three workflows, and a grep looked
+# for the version by value to catch a fourth copy. That one is gone: it matched
+# a bare `v0.36.1` anywhere under .github and said so itself, that it would fire
+# on any other action pinned to the same version.
 #
 # Usage:
 #
@@ -179,10 +178,34 @@ if [[ -n $copies ]]; then
 	fail "the buildkit pin is declared twice" "also in: ${copies//$'\n'/, }"
 fi
 
-# And the declaration has to stay a build input, along with the action that
-# reads it: either changed between publishing and merging would otherwise stop
-# failing verification and start reproducing a different image.
-for input in "$pins_file" .github/actions/setup-builder/action.yml; do
+# And exactly one file may stand a builder up. This is not the copy-comparison
+# the version grep was: it is the property .github/actions/setup-builder depends
+# on and cannot state about itself. A fourth workflow needing a builder and
+# writing `uses: docker/setup-buildx-action@<sha>` out is the obvious thing to
+# do, since nothing advertises the composite -- and it would be green while
+# running unpinned buildx on the mutable `moby/buildkit:buildx-stable-1`, which
+# surfaces as a digest mismatch read as nondeterminism.
+cases=$((cases + 1))
+setup_action=.github/actions/setup-builder/action.yml
+buildx=$(git -C "$root" grep -l 'docker/setup-buildx-action@' -- .github || true)
+
+if [[ $buildx != "$setup_action" ]]; then
+	fail "something other than ${setup_action} sets up buildx" \
+		"want: ${setup_action}" \
+		"got:  ${buildx//$'\n'/, }"
+fi
+
+# And everything that decides the bytes has to stay on build_inputs in
+# script/verify-digest, or a change to it between publishing and merging stops
+# failing verification and starts reproducing a different image. The whole list,
+# not the pins alone: a subset reads as if the class were covered.
+for input in \
+	Dockerfile \
+	"$pins_file" \
+	.github/workflows/publish-image.yml \
+	"$setup_action" \
+	.github/actions/build-image/action.yml; do
+
 	cases=$((cases + 1))
 
 	if ! grep -qE "^[[:space:]]*${input//./\\.}$" "${root}/script/verify-digest"; then
