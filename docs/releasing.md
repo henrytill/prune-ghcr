@@ -30,6 +30,8 @@ So:
 1. Merge that pull request.
 1. Run `script/release` and give it the same version. It verifies before
    tagging.
+1. Write the summary on the draft it prints, and publish it. Until then the tag
+   is out and the release page says nothing.
 
 Publishing cannot be triggered by the release tag. An image built from the tag
 would be referenced by nothing: `action.yml` at that tag was written earlier and
