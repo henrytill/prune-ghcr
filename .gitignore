@@ -13,6 +13,9 @@
 .DS_Store
 Thumbs.db
 
+# Symlink to AGENTS.md, for agents that look for the older name
+/CLAUDE.md
+
 # IDE files
 .idea
 *.code-workspace
