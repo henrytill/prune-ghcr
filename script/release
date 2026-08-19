@@ -32,7 +32,12 @@ set -e
 
 # Variables
 semver_tag_regex='v[0-9]+\.[0-9]+\.[0-9]+$'
-semver_tag_glob='v[0-9].[0-9].[0-9]*'
+# Each component is a run of digits, not one digit: the old glob could not
+# match v2.10.0, so the first two-digit component would silently resolve
+# latest_tag to the release before it -- which step 2 would check the draft of
+# and step 11 would generate notes from, re-listing everything the missed
+# version already shipped.
+semver_tag_glob='v[0-9]*.[0-9]*.[0-9]*'
 git_remote='origin'
 major_semver_tag_regex='\(v[0-9]*\)'
 
@@ -209,8 +214,9 @@ fi
 # that callers comparing digests do not have to, and a release body is read
 # rather than compared.
 if ! release_url=$(script/create-release "$new_tag" "docker://$pinned_image" "$previous_tag"); then
-	echo -e "${BOLD_RED}The tags are pushed, but no release was created${OFF}"
+	echo -e "${BOLD_RED}The tags are pushed, but this did not create a release${OFF}"
 	echo -e "Rerun: ${BOLD}script/create-release $new_tag docker://$pinned_image $previous_tag${OFF}"
+	echo -e "If it says the release already exists, it was created - publish that one"
 	exit 1
 fi
 
