@@ -208,8 +208,8 @@ installed:
 # a mismatch that looks like nondeterminism.
 image=ghcr.io/henrytill/prune-ghcr@<the digest being reproduced>
 rev=$(script/image-revision "$image") &&
-	git checkout "$rev" &&
-	epoch=$(script/source-date-epoch "$rev")
+  git checkout "$rev" &&
+  epoch=$(script/source-date-epoch "$rev")
 
 # Cleared, not just created: buildctl failing would otherwise leave the previous
 # run's layout in place for the comparison below to pass on.
@@ -227,14 +227,14 @@ podman run -d --name bk --privileged \
 # attempt, a host that wanted more than --privileged -- hangs instead of
 # saying anything, which is the worst way for a pasted recipe to fail.
 for _ in $(seq 40); do
-	up=$(podman container inspect -f '{{.State.Running}}' bk 2>/dev/null)
-	[[ $up == true ]] || break
-	podman exec bk buildctl debug workers >/dev/null 2>&1 && break
-	sleep 0.5
+  up=$(podman container inspect -f '{{.State.Running}}' bk 2>/dev/null)
+  [[ $up == true ]] || break
+  podman exec bk buildctl debug workers >/dev/null 2>&1 && break
+  sleep 0.5
 done
 podman exec bk buildctl debug workers >/dev/null || {
-	echo "buildkitd did not come up; podman logs bk" >&2
-	exit 1
+  echo "buildkitd did not come up; podman logs bk" >&2
+  exit 1
 }
 
 podman exec bk buildctl build \
