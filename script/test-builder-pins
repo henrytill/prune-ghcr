@@ -1,0 +1,224 @@
+#!/bin/bash
+
+# Exit early
+# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
+set -e
+
+# About:
+#
+# Checks that script/builder-pins reads the pins off the setup-buildx-action
+# step and nothing else.
+#
+# The reason this exists rather than being left to review: the way that script
+# fails is silent. A pattern matching no line exits non-zero and turns the job
+# red, but a pattern matching the wrong line returns a plausible version, and
+# the consumers - reproducible-image and verify-digest.yml - would then rebuild
+# with a builder the publish never used and report the mismatch as if the image
+# were nondeterministic. Nothing about that points back here.
+#
+# Each case builds a throwaway repository around a fixture workflow and runs a
+# copy of the real script against it, so the script under test is the file that
+# ships and the fixture is the only variable.
+#
+# Usage:
+#
+# script/test-builder-pins
+
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(git -C "$here" rev-parse --show-toplevel)
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+failures=0
+cases=0
+
+# Runs script/builder-pins over the fixture on stdin and compares status and
+# output against what was expected. Output is compared as one blob so that a
+# case can assert on both pins, or on the message a failure prints.
+#
+#   check <name> <expected status> <expected output> [<ref argument>...]
+check() {
+	local name=$1 want_status=$2 want_output=$3
+	shift 3
+
+	cases=$((cases + 1))
+
+	local dir="${tmp}/${cases}"
+	mkdir -p "${dir}/.github/workflows" "${dir}/script"
+	cat >"${dir}/.github/workflows/publish-image.yml"
+	cp "${root}/script/builder-pins" "${dir}/script/builder-pins"
+
+	git -C "$dir" init -q
+	git -C "$dir" add -A
+	git -C "$dir" \
+		-c user.name=test -c user.email=test@example.invalid \
+		commit -qm fixture
+
+	local output status=0
+	output=$("${dir}/script/builder-pins" "$@" 2>&1) || status=$?
+
+	if [[ $status -ne $want_status || $output != "$want_output" ]]; then
+		failures=$((failures + 1))
+		echo "FAIL: ${name}"
+		echo "  want status ${want_status}, got ${status}"
+		echo "  want output: ${want_output}"
+		echo "  got output:  ${output}"
+	fi
+}
+
+buildx_step() {
+	cat <<-'YAML'
+		      - name: Set Up Buildx
+		        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+		        with:
+		          version: v0.36.1
+		          cache-binary: false
+		          driver-opts: |
+		            image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+	YAML
+}
+
+decoy_step() {
+	cat <<-'YAML'
+		      - name: Lint
+		        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+		        with:
+		          version: v2.12.2
+		          driver-opts: |
+		            image=moby/buildkit:v0.0.1@sha256:0000000000000000000000000000000000000000000000000000000000000000
+	YAML
+}
+
+# A comment mentioning the buildx step, inside a step that is not it. This
+# repository writes comments like that constantly, and the pins below them are
+# the wrong ones.
+commented_decoy_step() {
+	cat <<-'YAML'
+		      - name: Lint
+		        # The builder pins are on the `uses: docker/setup-buildx-action@bb05f3f`
+		        # step below, and are not these.
+		        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+		        with:
+		          version: v2.12.2
+		          driver-opts: |
+		            image=moby/buildkit:v0.0.1@sha256:0000000000000000000000000000000000000000000000000000000000000000
+	YAML
+}
+
+preamble() {
+	cat <<-'YAML'
+		name: Publish Image
+		on:
+		  workflow_dispatch:
+		jobs:
+		  publish:
+		    runs-on: ubuntu-latest
+		    steps:
+	YAML
+}
+
+pins="BUILDX_VERSION=v0.36.1
+BUILDKIT_IMAGE=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8"
+
+# The shape the workflow has today.
+check "buildx step alone" 0 "$pins" < <(
+	preamble
+	buildx_step
+)
+
+# The regression this anchoring exists for: another action taking `version:`,
+# and a buildkit image in its driver-opts for good measure, ahead of the step
+# that decides the build.
+check "decoy pins above" 0 "$pins" < <(
+	preamble
+	decoy_step
+	buildx_step
+)
+
+check "decoy pins below" 0 "$pins" < <(
+	preamble
+	buildx_step
+	decoy_step
+)
+
+# The step written as a list item rather than named first, which moves the
+# `uses:` line onto the `-` and so changes where the block starts.
+check "inline uses form" 0 "$pins" < <(
+	preamble
+	buildx_step | sed -E '1d; s|^      (  uses:)|      -\1|; s|^        |          |'
+)
+
+# YAML does not order mapping keys, so a step that writes `uses:` last still
+# pins what it pins.
+check "uses written last" 0 "$pins" < <(
+	preamble
+	buildx_step | sed -E '2d'
+	printf '        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c\n'
+)
+
+check "decoy step mentioning buildx in a comment" 0 "$pins" < <(
+	preamble
+	commented_decoy_step
+	buildx_step
+)
+
+# A buildx step with no version must fail rather than reach past its own step
+# for one. This is what the block end buys: `head -1` alone would take the
+# decoy's.
+check "no version on the buildx step" 1 \
+	"no builder pins in publish-image.yml at HEAD" < <(
+		preamble
+		buildx_step | grep -v 'version: v0.36.1'
+		decoy_step
+	)
+
+check "no buildx step" 1 \
+	"no docker/setup-buildx-action step in publish-image.yml at HEAD" < <(
+		preamble
+		decoy_step
+	)
+
+# An argument that is present but empty is a caller whose own lookup failed, and
+# must not be answered with HEAD.
+check "empty ref" 2 "empty ref" "" < <(
+	preamble
+	buildx_step
+)
+
+# Finally the file the consumers actually read, cross-checked against a reading
+# of it written independently of the script - a sed range over the step rather
+# than an awk block, and no fixed context window, so that adding a comment or
+# reordering the inputs does not turn a correct workflow edit into a red test
+# pointing at the parser.
+#
+# From HEAD, because that is what builder-pins reads with no ref. Grepping the
+# working tree instead would fail on an uncommitted pin bump, for a reason that
+# has nothing to do with the parse.
+buildx_step_at_head() {
+	git -C "$root" show HEAD:.github/workflows/publish-image.yml |
+		sed -n '/uses: docker\/setup-buildx-action@/,/^      - name:/p'
+}
+
+want_version=$(buildx_step_at_head | sed -nE 's|^ *version: (v[0-9.]+) *$|\1|p')
+want_image=$(buildx_step_at_head |
+	sed -nE 's|^ *image=(moby/buildkit:.+@sha256:[0-9a-f]{64}) *$|\1|p')
+
+cases=$((cases + 1))
+got=$("${root}/script/builder-pins")
+want="BUILDX_VERSION=${want_version}
+BUILDKIT_IMAGE=${want_image}"
+
+if [[ -z $want_version || -z $want_image || $got != "$want" ]]; then
+	failures=$((failures + 1))
+	echo "FAIL: this repository's publish-image.yml"
+	echo "  want output: ${want}"
+	echo "  got output:  ${got}"
+fi
+
+if [[ $failures -gt 0 ]]; then
+	echo "${failures} of ${cases} cases failed" >&2
+	exit 1
+fi
+
+echo "${cases} cases passed"

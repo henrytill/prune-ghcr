@@ -102,6 +102,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # Before reading them, because the way that script fails is quiet: it
+      # matches by shape, so a pattern that finds the wrong line returns a
+      # plausible version rather than an error, and this job would then rebuild
+      # with a builder no publish ever used and report the difference as
+      # nondeterminism.
+      - name: Test the builder pin parser
+        id: test-pins
+        run: script/test-builder-pins
+
       # From publish-image.yml, because this job exists to reproduce what that
       # workflow produces, and buildx and buildkit decide the bytes as much as
       # the Dockerfile does. Restating them here made a second copy that a bump
