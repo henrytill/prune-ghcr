@@ -39,8 +39,23 @@ jobs:
           package: ${{ inputs.package }}
           dry-run: 'true'
 
+      # A dry run deletes nothing, so `deleted` and `failed` are always zero
+      # here and printing them would say nothing. The count worth reporting is
+      # the difference between what was considered and what would survive.
+      #
+      # The emptiness check is not defensive padding. `uses: ./` runs the image
+      # action.yml pins, which is the last published one, so `total` is empty
+      # until a release carries it - and an empty operand in $(( )) is zero, so
+      # the subtraction would quietly report a negative count instead.
       - name: Print Output
         id: output
         env:
+          TOTAL: ${{ steps.prune.outputs.total }}
           KEPT: ${{ steps.prune.outputs.kept }}
-        run: echo "kept $KEPT"
+        run: |
+          if [ -z "$TOTAL" ]; then
+            echo "keeping $KEPT; the pinned image does not report a total"
+            exit 0
+          fi
+          echo "considered $TOTAL, keeping $KEPT"
+          echo "would delete $((TOTAL - KEPT))"
