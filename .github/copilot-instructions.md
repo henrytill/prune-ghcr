@@ -29,7 +29,6 @@ before the commit that references it is tagged.
 | `.yaml-lint.yml`     | YAML Linter Configuration                          |
 | `action.yml`         | GitHub Action Metadata                             |
 | `AGENTS.md`          | Instructions for coding agents                     |
-| `CODEOWNERS`         | Code Owners File                                   |
 | `Dockerfile`         | Builds the image the action runs                   |
 | `go.mod`, `go.sum`   | Go Module Definition                               |
 | `LICENSE`            | License File                                       |
