@@ -50,6 +50,25 @@ runs:
     # supply its own. .github/builder-pins.env is the declaration and every
     # build is a consumer; a caller that could pass a version would be the
     # second copy this action exists to remove.
+    #
+    # The pinned image is first and the caller's options follow, so a caller
+    # naming `image=` would win or lose by buildx's parse order rather than by
+    # anything written down -- and would be running a buildkit no publish used,
+    # which reports itself as a digest mismatch somewhere else entirely. The
+    # same refusal .github/actions/build-image makes about the attributes it
+    # fixes on `output`, for the same reason.
+    - name: Check the caller is not passing a build input
+      shell: bash
+      env:
+        DRIVER_OPTS: ${{ inputs.driver-opts }}
+      run: |
+        # One option per line is how buildx splits this list, so that is what
+        # a line is checked against.
+        if grep -qE '^[[:space:]]*image=' <<<"$DRIVER_OPTS"; then
+          echo "::error::setup-builder sets the buildkit image; driver-opts must not"
+          exit 1
+        fi
+
     - name: Read the builder pins
       id: pins
       shell: bash
@@ -62,7 +81,8 @@ runs:
         version: ${{ steps.pins.outputs.BUILDX_VERSION }}
         cache-binary: false
         # The caller's options follow the pinned image, and an empty input
-        # leaves a blank line, which buildx's list parse drops.
+        # leaves a blank line, which buildx's list parse drops. `image=` is
+        # refused above rather than left to that order.
         driver-opts: |
           image=${{ steps.pins.outputs.BUILDKIT_IMAGE }}
           ${{ inputs.driver-opts }}
