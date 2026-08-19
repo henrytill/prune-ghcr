@@ -3,8 +3,23 @@
 profile: coverage.out
 
 threshold:
-  # Only a total is enforced. Per-file and per-package minimums would fail on
-  # cmd/prune-ghcr, which sits at 13% because run() constructs real clients
-  # against hardcoded hosts and is not reachable from a test without a
-  # refactor. A floor that has to be waived is not a floor.
+  # cmd/prune-ghcr is the reason this was a total and nothing else: it sat at
+  # 20%, because run() read the inputs, built the clients and wrote the outputs
+  # in one function that no test could reach. Now that readInputs and
+  # pruneAndReport are reachable it is at 66%, and what is left -- main, run and
+  # the logger adapter -- is client construction against ghcr.io and os.Exit.
+  #
+  # So a package floor is finally worth having. Without one, cmd could fall back
+  # to 20% and the total would absorb it behind five packages in the high
+  # eighties and nineties, which is exactly the regression the tests were added
+  # to prevent.
+  package: 60
   total: 75
+
+exclude:
+  paths:
+    # Test helpers, exercised by other packages' test binaries. Coverage is
+    # attributed to the package under test, so these statements run constantly
+    # and are counted as never run -- 0% for the package, and five points off
+    # the total.
+    - internal/actions/actionstest
