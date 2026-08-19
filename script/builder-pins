@@ -45,7 +45,10 @@ import re
 import subprocess
 import sys
 
-import yaml
+# PyYAML is on ubuntu-latest and in the devcontainer's Debian base, but
+# not inside super-linter's container, where pylint would otherwise report
+# an import error for a module it is not being asked to run.
+import yaml  # pylint: disable=import-error
 
 WORKFLOW = ".github/workflows/publish-image.yml"
 ACTION = "docker/setup-buildx-action@"

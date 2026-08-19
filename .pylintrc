@@ -1,0 +1,11 @@
+# Everything in script/ is a command: hyphenated, extensionless, and
+# imported by nothing. pylint's module-name check reads those filenames as
+# module names and objects to every one of them, which is the only rule
+# that disagrees with the convention rather than with the code.
+#
+# Named .pylintrc, and named again in linter.yml, so that pylint finds it
+# on its own the way a local run would and super-linter is told to use the
+# same file rather than its own default.
+
+[BASIC]
+module-naming-style = any

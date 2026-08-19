@@ -39,6 +39,9 @@ jobs:
           DEFAULT_BRANCH: main
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LINTER_RULES_PATH: .
+          # Read by pylint on its own too, unlike the .python-lint name
+          # super-linter would otherwise look for. See .pylintrc.
+          PYTHON_PYLINT_CONFIG_FILE: .pylintrc
           VALIDATE_ALL_CODEBASE: true
           # Not leftovers from the TypeScript action, despite there being no
           # JavaScript here: biome also formats and lints JSON, and the JSON
