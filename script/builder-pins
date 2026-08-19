@@ -41,8 +41,40 @@ fi
 
 workflow=$(git show "${ref}:.github/workflows/publish-image.yml")
 
-version=$(echo "$workflow" | sed -nE 's|^ *version: (v[0-9.]+) *$|\1|p' | head -1)
-image=$(echo "$workflow" |
+# Narrow to the setup-buildx-action step before matching anything by shape.
+#
+# Both patterns below match a line, not a step, and `version:` is an input plenty
+# of other actions take - golangci-lint-action in ci.yml, to name one already in
+# this repository. Adding such a step above Set Up Buildx would have handed both
+# consumers a buildx version belonging to something else, and it would have done
+# it quietly: a pattern that matches nothing exits non-zero, but a pattern that
+# matches the wrong line succeeds, and verify-digest.yml would then report a
+# correctly published digest as failing to reproduce.
+#
+# The whole list item is taken, not the part from `uses:` onwards: YAML does not
+# order mapping keys, so a step writing `with:` above `uses:` still pins what it
+# pins. The anchor is `^ *(- +)?uses:` rather than the action name alone, or a
+# comment mentioning the step - the kind this repository writes constantly -
+# would anchor the block on whatever step the comment happens to sit in.
+step=$(echo "$workflow" | awk '
+	function indent(line) { match(line, /^ */); return RLENGTH }
+	/^ *- / && (!started || indent($0) <= ind) {
+		if (found) { printf "%s", buf; exit }
+		buf = ""; ind = indent($0); started = 1
+	}
+	found && /[^ \t]/ && !/^ *- / && indent($0) < ind { printf "%s", buf; exit }
+	{ buf = buf $0 ORS }
+	/^ *(- +)?uses:[ \t]*docker\/setup-buildx-action@/ { found = 1 }
+	END { if (found) printf "%s", buf }
+')
+
+if [[ -z $step ]]; then
+	echo "no docker/setup-buildx-action step in publish-image.yml at ${ref}" >&2
+	exit 1
+fi
+
+version=$(echo "$step" | sed -nE 's|^ *version: (v[0-9.]+) *$|\1|p' | head -1)
+image=$(echo "$step" |
 	sed -nE 's|^ *image=(moby/buildkit:.+@sha256:[0-9a-f]{64}) *$|\1|p' | head -1)
 
 if [[ -z $version || -z $image ]]; then
