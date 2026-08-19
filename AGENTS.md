@@ -184,3 +184,8 @@ the `.licenses/` cache regenerated through the Licensed workflow dispatch.
   at all. A new third-party action needs adding to the allowlist under Settings
   → Actions before it will resolve; an unlisted one fails the whole workflow at
   startup with no annotation.
+- Pull requests are merged with `gh pr merge --rebase`. Merge commits and
+  squashing are disabled in the repository settings, so `main` stays linear and
+  every commit that lands is one that was pushed and tested on its own — which
+  is also why a commit has to build alone. The branch is deleted automatically
+  on merge, so `--delete-branch` is belt and braces rather than the mechanism.
