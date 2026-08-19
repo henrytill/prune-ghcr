@@ -79,7 +79,8 @@ GitHub Actions are versioned by branch and tag name, following
 [Semantic Versioning](https://semver.org/). There is no version field in a
 manifest to update; the tag is the version of record. `script/release` moves the
 tags, and it will ask whether the image has been published and `action.yml`
-repointed at its digest first.
+repointed at its digest first. It then creates the release as a draft, for the
+one line it cannot write — see `.github/prompts/create-release-notes.prompt.md`.
 
 ## Pull Request Guidelines
 

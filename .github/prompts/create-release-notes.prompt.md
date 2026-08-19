@@ -1,37 +1,55 @@
 # Create Release Notes
 
-You are an expert technical writer tasked with creating release notes for
-updates to this repository. Your specific task is to generate release notes that
-are clear, concise, and useful for developers and users of the project.
+`script/release` creates the release as a draft. What it prepares is the image
+the tag pins, fenced, above GitHub's generated list of merged pull requests:
 
-## Guidelines
+````text
+```
+docker://ghcr.io/henrytill/prune-ghcr@sha256:...
+```
 
-Ensure you adhere to the following guidelines when creating release notes:
+## What's Changed
+* ...
+````
 
-- Use a clear and consistent format for the release notes
-- Include a summary of the changes made in the release
-- Highlight any new features, improvements, or bugfixes
-- If applicable, include instructions for upgrading or migrating to the new
-  version
-- Use technical language that is appropriate for the audience, but avoid jargon
-  that may not be understood by all users
-- Ensure that the release notes are easy to read and navigate
-- Include relevant issue or PR numbers where applicable
-- Use proper Markdown formatting
+Your task is the summary that goes **above** that, and nothing else. The
+generated list is accurate and complete, and that is exactly why it cannot say
+what the version is for: the change a release is named after sits in it as one
+bullet among many, between a dependabot bump and a lint fix.
+
+## What to write
+
+- One or two sentences naming what this version is for. Say the thing the list
+  below cannot say by being complete
+- Anything a consumer has to do — an input added, renamed or removed, a
+  behaviour that changed — immediately under the summary, as a note or warning
+  callout if it is an action rather than a fact
+- For a **major** version, what breaks and how to adapt to it
+- For a **minor** version, the feature or improvement the version exists for
+- For a **patch** version, the fix, in terms of the symptom someone would have
+  noticed
+
+## What not to write
+
+- Do not restate the merged pull requests. They are already below, with numbers
+  and authors, and the summary earns its place by not being that list
+- Do not add the digest, a heading, or a compare link. The fenced block is the
+  image `script/release` verified as published under this tag, and the generated
+  notes already end with a **Full Changelog** link
+- Do not edit or reorder anything below your summary. All of it is either
+  verified or generated
+
+## Formatting
+
 - Put each paragraph on one line, however long: release notes are rendered with
   hard line breaks, so a wrapped paragraph becomes ragged short lines
-- Use code blocks for commands, configuration examples, or code changes
-- Use note and warning callouts for important information
+- Use code blocks for commands and configuration
+- Use note and warning callouts for information that has to be acted on
 
 ## Versioning
 
 GitHub Actions are versioned using branch and tag names. There is no version
-recorded in the source: the release tag is the version, and it should reflect
-the changes made in the codebase and follow
-[Semantic Versioning](https://semver.org/) principles. Depending on the nature
-of the changes, please make sure to adjust the release notes accordingly:
-
-- For **major** changes, include a detailed description of the breaking changes
-  and how users can adapt to them
-- For **minor** changes, highlight new features and improvements
-- For **patch** changes, focus on bugfixes and minor improvements
+recorded in the source: the release tag is the version, and it follows
+[Semantic Versioning](https://semver.org/). The tag is chosen before the draft
+exists, so it is a fact about the release rather than a decision left here —
+what it changes is which of the three cases above the summary is written for.
