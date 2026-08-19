@@ -1,0 +1,238 @@
+#!/bin/bash
+
+# Exit early
+# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
+set -e
+
+# About:
+#
+# Checks script/builder-pins and the file it reads.
+#
+# There is much less to check than there was: the pins are declared as
+# key=value and read as key=value, so the parse that used to need testing is
+# gone. What is left is the failure that survives any implementation - a pin
+# that is missing or empty rather than wrong. An empty BUILDKIT_IMAGE leaves
+# driver-opts naming nothing and the builder falls back to the mutable
+# `moby/buildkit:buildx-stable-1`, which is nondeterminism that reports itself
+# as a digest mismatch somewhere else entirely.
+#
+# The last two cases are the ones that keep the declaration single. Nothing
+# stops someone writing a version back onto a buildx step, and nothing about
+# that looks wrong in review.
+#
+# Usage:
+#
+# script/test-builder-pins
+
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(git -C "$here" rev-parse --show-toplevel)
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+failures=0
+cases=0
+
+fail() {
+	failures=$((failures + 1))
+	echo "FAIL: $1"
+	shift
+	printf '  %s\n' "$@"
+}
+
+# Runs script/builder-pins over the pins file on stdin, in a throwaway
+# repository, and compares status and output against what was expected. A copy
+# of the shipped script, so the script under test is the file that ships.
+#
+#   check <name> <expected status> <expected output> [<ref argument>...]
+check() {
+	local name=$1 want_status=$2 want_output=$3
+	shift 3
+
+	cases=$((cases + 1))
+
+	local dir="${tmp}/${cases}"
+	mkdir -p "${dir}/.github" "${dir}/script"
+	cat >"${dir}/.github/builder-pins.env"
+	cp "${root}/script/builder-pins" "${dir}/script/builder-pins"
+
+	git -C "$dir" init -q
+	git -C "$dir" add -A
+	git -C "$dir" \
+		-c user.name=test -c user.email=test@example.invalid \
+		commit -qm fixture
+
+	local output status=0
+	output=$("${dir}/script/builder-pins" "$@" 2>&1) || status=$?
+
+	if [[ $status -ne $want_status || $output != "$want_output" ]]; then
+		fail "$name" \
+			"want status ${want_status}, got ${status}" \
+			"want output: ${want_output}" \
+			"got output:  ${output}"
+	fi
+}
+
+# Assembled rather than written out, so that the check below - nothing may
+# carry a second copy of a buildkit pin - can be run over this file too.
+image=moby/buildkit:v0.0.1@sha256:$(printf '0%.0s' {1..64})
+pins="BUILDKIT_IMAGE=${image}
+BUILDX_VERSION=v0.0.1"
+pins_file=.github/builder-pins.env
+
+# Comments and blank lines are stripped, because $GITHUB_OUTPUT rejects a line
+# that is not key=value.
+check "a file with comments" 0 "$pins" <<-ENV
+	# The pins.
+
+	${pins}
+
+	# Trailing remarks.
+ENV
+
+check "no buildkit image" 1 \
+	"no BUILDKIT_IMAGE in .github/builder-pins.env at HEAD" <<-ENV
+		BUILDX_VERSION=v0.0.1
+	ENV
+
+check "no buildx version" 1 \
+	"no BUILDX_VERSION in .github/builder-pins.env at HEAD" <<-ENV
+		BUILDKIT_IMAGE=${image}
+	ENV
+
+# A key with nothing after the `=` is the case a plain presence check misses,
+# and it is the one that reaches buildx as an empty driver-opt.
+check "an empty value" 1 \
+	"no BUILDX_VERSION in .github/builder-pins.env at HEAD" <<-ENV
+		BUILDKIT_IMAGE=${image}
+		BUILDX_VERSION=
+	ENV
+
+# A bump that adds a line and forgets to delete the old one. A presence check
+# is satisfied by either line, and $GITHUB_OUTPUT keeps the last silently.
+check "a key declared twice" 1 \
+	"BUILDKIT_IMAGE declared 2 times in .github/builder-pins.env at HEAD" <<-ENV
+		${pins}
+		BUILDKIT_IMAGE=${image}
+	ENV
+
+# Anything else surviving the comment strip would be appended to $GITHUB_OUTPUT
+# verbatim, where GitHub's "Invalid format" names nothing.
+check "an unexpected line" 1 \
+	"unexpected line in .github/builder-pins.env at HEAD: BUILDX_TAG=v1" <<-ENV
+		${pins}
+		BUILDX_TAG=v1
+	ENV
+
+# Through a variable, so that no formatter can quietly strip the trailing
+# space this case is about and leave it passing for the wrong reason.
+space=" "
+
+check "whitespace in a value" 1 \
+	"whitespace in BUILDX_VERSION in .github/builder-pins.env at HEAD" <<-ENV
+		BUILDKIT_IMAGE=${image}
+		BUILDX_VERSION=v0.0.1${space}
+	ENV
+
+# One key prints one value, so that a caller wanting a single pin does not cut
+# it out of the pair and forget to guard against the empty string.
+check "one key" 0 "$image" HEAD BUILDKIT_IMAGE <<-ENV
+	${pins}
+ENV
+
+# And a key that is not one of the two is a typo, not an empty answer.
+check "an unknown key" 2 "unknown key BUILDKIT_IMAGES" HEAD BUILDKIT_IMAGES <<-ENV
+	${pins}
+ENV
+
+# An argument that is present but empty is a caller whose own lookup failed, and
+# must not be answered with HEAD.
+check "empty ref" 2 "empty ref" "" <<-ENV
+	${pins}
+ENV
+
+# The file this repository actually ships, whose values have to be usable rather
+# than merely present.
+cases=$((cases + 1))
+got=$("${root}/script/builder-pins")
+
+if ! grep -qE '^BUILDKIT_IMAGE=moby/buildkit:\S+@sha256:[0-9a-f]{64}$' <<<"$got" ||
+	! grep -qE '^BUILDX_VERSION=v[0-9.]+$' <<<"$got"; then
+	fail "this repository's builder pins" "got output: ${got}"
+fi
+
+# Nothing may carry a second copy of the buildkit pin. Only the declaration is
+# excluded: this file assembles its fixture pin at run time and
+# docs/releasing.md reads the real one with this script, so neither is a copy.
+cases=$((cases + 1))
+copies=$(git -C "$root" grep -lE 'moby/buildkit:[^ ]*@sha256:[0-9a-f]{64}' |
+	grep -vxF -- "$pins_file" || true)
+
+if [[ -n $copies ]]; then
+	fail "the buildkit pin is declared twice" "also in: ${copies//$'\n'/, }"
+fi
+
+# The check above matches the buildkit pin, which is distinctive. The buildx
+# version is a bare `v0.36.1`, so it is looked for by value instead: nothing
+# under .github outside the declaration may contain the string it holds. Through
+# the reader, since that is the accessor everything else uses.
+#
+# .github rather than .github/workflows, because a buildx step is as likely to
+# end up in a composite action -- which is where build-image already lives, and
+# is a build input too.
+#
+# If some other action is ever pinned to the same version this will complain
+# about a coincidence. That is the right way round -- it fails loudly, and the
+# fix is to exclude that file here rather than to discover a second copy of the
+# pin from a digest mismatch.
+cases=$((cases + 1))
+version=$("${root}/script/builder-pins" HEAD BUILDX_VERSION)
+named=$(git -C "$root" grep -lF -- "$version" .github ":!${pins_file}" || true)
+
+if [[ -n $named ]]; then
+	fail "the buildx version is named outside the declaration" \
+		"in: ${named//$'\n'/, }"
+fi
+
+# And a workflow that sets up buildx has to read the pins rather than name them.
+cases=$((cases + 1))
+buildx=$(git -C "$root" grep -l 'docker/setup-buildx-action@' -- .github || true)
+unread=$(xargs -r git -C "$root" grep -L 'script/builder-pins' -- <<<"$buildx" || true)
+
+if [[ -z $buildx ]]; then
+	fail "nothing sets up buildx" \
+		"the two checks below have nothing to check"
+fi
+
+if [[ -n $unread ]]; then
+	fail "a buildx step does not read the pins" "in: ${unread//$'\n'/, }"
+fi
+
+# `cache-binary: false` is the same invariant as the pins, and was in the same
+# position: explained at length on the steps and checked nowhere. The cache that
+# action writes is a per-repository one a pull request can populate, so
+# restoring the buildx binary from it undoes the version pin.
+cases=$((cases + 1))
+cached=$(xargs -r git -C "$root" grep -L 'cache-binary: false' -- <<<"$buildx" || true)
+
+if [[ -n $cached ]]; then
+	fail "a buildx step may restore its binary from the cache" \
+		"in: ${cached//$'\n'/, }"
+fi
+
+# And the declaration has to stay a build input, or a pin changed between
+# publishing and merging stops failing verification and starts reproducing a
+# different image.
+cases=$((cases + 1))
+
+if ! grep -qE "^[[:space:]]*${pins_file//./\\.}$" "${root}/script/verify-digest"; then
+	fail "the declaration is not a build input" \
+		"expected ${pins_file} in build_inputs in script/verify-digest"
+fi
+
+if [[ $failures -gt 0 ]]; then
+	echo "${failures} of ${cases} cases failed" >&2
+	exit 1
+fi
+
+echo "${cases} cases passed"
