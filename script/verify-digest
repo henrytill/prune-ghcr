@@ -49,9 +49,10 @@ fi
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$(git -C "$here" rev-parse --show-toplevel)"
 
-# The last three are here because they decide the bytes a build produces as much
+# The last four are here because they decide the bytes a build produces as much
 # as the Dockerfile does: builder-pins.env holds the buildx and buildkit pins,
-# publish-image.yml holds what publishing passes the build, and the build-image
+# publish-image.yml holds what publishing passes the build, the setup-builder
+# action holds how the builder those pins name is stood up, and the build-image
 # action holds the platforms, the timestamp rewriting, the media types and the
 # build-push-action version. Any of them changed between publishing and merging
 # would otherwise fail verification on an image that reproduces perfectly.
@@ -63,6 +64,7 @@ build_inputs=(
 	Dockerfile
 	.github/builder-pins.env
 	.github/workflows/publish-image.yml
+	.github/actions/setup-builder/action.yml
 	.github/actions/build-image/action.yml
 )
 

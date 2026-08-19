@@ -1,0 +1,69 @@
+name: Set up the builder
+description: >-
+  Installs buildx at the pinned version and starts a builder on the pinned
+  buildkit, so that every build of the action's image runs on the builder
+  publishing ran on.
+
+# buildx and buildkit decide the bytes a build produces as much as the
+# Dockerfile does, and `cache-binary: false` is what keeps the version pin
+# meaning anything. All three were written out on three steps in three
+# workflows, kept identical by comments and policed after the fact by greps in
+# script/test-builder-pins. This is the one copy, for the same reason
+# .github/actions/build-image is the one copy of the flags the digest is over.
+#
+# The SHA pins the action and nothing else: without `version` it installs the
+# newest buildx release, and without `image` the builder runs whatever
+# `moby/buildkit:buildx-stable-1` points at that day.
+#
+# `cache-binary: false` because the point of pinning a version is to know which
+# binary runs. The cache that action writes is a per-repository one a pull
+# request can populate, so restoring the buildx binary from it would take it
+# from something less trustworthy than the pin -- and would do it in the
+# workflow that publishes. Downloading it each run costs seconds.
+#
+# What callers vary is only how the builder reaches a registry, which is not a
+# build input: ci.yml's reproducible-image pushes to a registry service over
+# plain HTTP.
+inputs:
+  driver-opts:
+    description: >-
+      Extra driver options, one per line, appended to the pinned buildkit image.
+      For reaching a registry, not for anything the digest is over.
+    required: false
+    default: ''
+  buildkitd-config-inline:
+    description: >-
+      Extra buildkitd configuration, in TOML. For reaching a registry, as above.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    # A composite action rather than a reusable workflow, for the reasons
+    # .github/actions/build-image gives: the steps have to run in the calling
+    # job -- reproducible-image builds three times on one runner and pushes to a
+    # service defined on that job -- and the reported check names have to
+    # survive, because the main ruleset requires them by name.
+    #
+    # The pins are read here rather than passed in, so that a caller cannot
+    # supply its own. .github/builder-pins.env is the declaration and every
+    # build is a consumer; a caller that could pass a version would be the
+    # second copy this action exists to remove.
+    - name: Read the builder pins
+      id: pins
+      shell: bash
+      run: script/builder-pins >>"$GITHUB_OUTPUT"
+
+    - name: Set Up Buildx
+      id: buildx
+      uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      with:
+        version: ${{ steps.pins.outputs.BUILDX_VERSION }}
+        cache-binary: false
+        # The caller's options follow the pinned image, and an empty input
+        # leaves a blank line, which buildx's list parse drops.
+        driver-opts: |
+          image=${{ steps.pins.outputs.BUILDKIT_IMAGE }}
+          ${{ inputs.driver-opts }}
+        buildkitd-config-inline: ${{ inputs.buildkitd-config-inline }}

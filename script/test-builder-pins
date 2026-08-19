@@ -16,9 +16,16 @@ set -e
 # `moby/buildkit:buildx-stable-1`, which is nondeterminism that reports itself
 # as a digest mismatch somewhere else entirely.
 #
-# The last two cases are the ones that keep the declaration single. Nothing
-# stops someone writing a version back onto a buildx step, and nothing about
-# that looks wrong in review.
+# The cases at the end are the ones that keep the declaration single and
+# consumed: that nothing else carries a copy of the buildkit pin, and that the
+# two files deciding which builder a build runs on are diffed as build inputs.
+#
+# There used to be three more, checking that no workflow named the buildx
+# version and that every buildx step kept `cache-binary: false`. There was one
+# buildx step written out in three workflows then, and those greps were how the
+# three were kept the same -- after the fact, once someone had already written
+# the wrong thing. .github/actions/setup-builder is the one step now, so there
+# is nothing left for them to compare.
 #
 # Usage:
 #
@@ -172,63 +179,17 @@ if [[ -n $copies ]]; then
 	fail "the buildkit pin is declared twice" "also in: ${copies//$'\n'/, }"
 fi
 
-# The check above matches the buildkit pin, which is distinctive. The buildx
-# version is a bare `v0.36.1`, so it is looked for by value instead: nothing
-# under .github outside the declaration may contain the string it holds. Through
-# the reader, since that is the accessor everything else uses.
-#
-# .github rather than .github/workflows, because a buildx step is as likely to
-# end up in a composite action -- which is where build-image already lives, and
-# is a build input too.
-#
-# If some other action is ever pinned to the same version this will complain
-# about a coincidence. That is the right way round -- it fails loudly, and the
-# fix is to exclude that file here rather than to discover a second copy of the
-# pin from a digest mismatch.
-cases=$((cases + 1))
-version=$("${root}/script/builder-pins" HEAD BUILDX_VERSION)
-named=$(git -C "$root" grep -lF -- "$version" .github ":!${pins_file}" || true)
+# And the declaration has to stay a build input, along with the action that
+# reads it: either changed between publishing and merging would otherwise stop
+# failing verification and start reproducing a different image.
+for input in "$pins_file" .github/actions/setup-builder/action.yml; do
+	cases=$((cases + 1))
 
-if [[ -n $named ]]; then
-	fail "the buildx version is named outside the declaration" \
-		"in: ${named//$'\n'/, }"
-fi
-
-# And a workflow that sets up buildx has to read the pins rather than name them.
-cases=$((cases + 1))
-buildx=$(git -C "$root" grep -l 'docker/setup-buildx-action@' -- .github || true)
-unread=$(xargs -r git -C "$root" grep -L 'script/builder-pins' -- <<<"$buildx" || true)
-
-if [[ -z $buildx ]]; then
-	fail "nothing sets up buildx" \
-		"the two checks below have nothing to check"
-fi
-
-if [[ -n $unread ]]; then
-	fail "a buildx step does not read the pins" "in: ${unread//$'\n'/, }"
-fi
-
-# `cache-binary: false` is the same invariant as the pins, and was in the same
-# position: explained at length on the steps and checked nowhere. The cache that
-# action writes is a per-repository one a pull request can populate, so
-# restoring the buildx binary from it undoes the version pin.
-cases=$((cases + 1))
-cached=$(xargs -r git -C "$root" grep -L 'cache-binary: false' -- <<<"$buildx" || true)
-
-if [[ -n $cached ]]; then
-	fail "a buildx step may restore its binary from the cache" \
-		"in: ${cached//$'\n'/, }"
-fi
-
-# And the declaration has to stay a build input, or a pin changed between
-# publishing and merging stops failing verification and starts reproducing a
-# different image.
-cases=$((cases + 1))
-
-if ! grep -qE "^[[:space:]]*${pins_file//./\\.}$" "${root}/script/verify-digest"; then
-	fail "the declaration is not a build input" \
-		"expected ${pins_file} in build_inputs in script/verify-digest"
-fi
+	if ! grep -qE "^[[:space:]]*${input//./\\.}$" "${root}/script/verify-digest"; then
+		fail "${input} is not a build input" \
+			"expected ${input} in build_inputs in script/verify-digest"
+	fi
+done
 
 if [[ $failures -gt 0 ]]; then
 	echo "${failures} of ${cases} cases failed" >&2

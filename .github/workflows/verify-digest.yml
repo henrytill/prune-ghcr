@@ -49,33 +49,21 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: script/verify-digest "$BASE"
 
-      # Read rather than restated. buildx and buildkit decide the bytes a build
-      # produces, so a rebuild has to use what publishing used; a third hardcoded
-      # copy of the pins is a copy that can be missed by a bump, and the rebuild
-      # would then report the mismatch as if the build were nondeterministic.
-      # script/verify-digest's build-input diff covers .github/builder-pins.env,
-      # so its pins at HEAD are the pins the image was built with.
+      # The builder publishing used, from .github/actions/setup-builder. A
+      # rebuild has to use the buildx and buildkit a publish used, or it reports
+      # the difference as if the image were nondeterministic;
+      # script/verify-digest's build-input diff covers both
+      # .github/builder-pins.env and that action, so what they say at HEAD is
+      # what the image was built with.
       #
-      # After the plan, and skipped with it: the only consumer is the buildx
-      # step below, which most pull requests do not reach.
-      - name: Read the builder pins publishing uses
-        id: pins
-        if: steps.plan.outputs.changed == 'true'
-        run: script/builder-pins >>"$GITHUB_OUTPUT"
-
-      # The plan used to need buildx, to read the revision label off the
-      # published image; script/image-revision asks the registry now, so the
-      # only thing left that needs a builder is the rebuild - which most pull
-      # requests do not do.
+      # After the plan, and skipped with it: the only thing left that needs a
+      # builder is the rebuild, which most pull requests do not do. The plan
+      # used to need one as well, to read the revision label off the published
+      # image; script/image-revision asks the registry now.
       - name: Set Up Buildx
         id: buildx
         if: steps.plan.outputs.changed == 'true'
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-        with:
-          version: ${{ steps.pins.outputs.BUILDX_VERSION }}
-          cache-binary: false
-          driver-opts: |
-            image=${{ steps.pins.outputs.BUILDKIT_IMAGE }}
+        uses: ./.github/actions/setup-builder
 
       # Every flag has to match what publish-image.yml passed, or this rebuilds
       # something else. The exporter differs - an OCI layout rather than a push -
