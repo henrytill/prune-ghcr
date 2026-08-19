@@ -99,6 +99,12 @@ The body of the PR should include:
 - A link to any relevant issues or discussions
 - Any additional context that may be helpful for reviewers
 
+Each paragraph of the body goes on a single line, however long. GitHub renders
+pull request and issue text with hard line breaks on, so wrapping a paragraph at
+80 columns produces ragged short lines rather than prose that reflows. Markdown
+files in the repository are wrapped as usual; this applies only to text typed
+into GitHub.
+
 ## Code Review Guidelines
 
 When performing a code review, please follow these guidelines:
