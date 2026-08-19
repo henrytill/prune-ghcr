@@ -115,32 +115,20 @@ jobs:
         with:
           persist-credentials: false
 
-      # From .github/builder-pins.env, the file publishing reads too, because
-      # buildx and buildkit decide the bytes as much as the Dockerfile does.
-      # Restating them here made a second copy that a bump could miss, which
-      # would show up as this job disagreeing with a publish.
-      - name: Read the builder pins publishing uses
-        id: pins
-        run: script/builder-pins >>"$GITHUB_OUTPUT"
-
-      # `network=host` and the inline config are what let the builder reach the
-      # registry service over plain HTTP; neither affects the bytes a build
-      # produces.
+      # The same builder publishing stands up, from
+      # .github/actions/setup-builder: buildx and buildkit decide the bytes as
+      # much as the Dockerfile does, so this job comparing builds is only worth
+      # anything if it compares them on the builder a publish would use.
       #
-      # `cache-binary: false` because the point of pinning a version is to know
-      # which binary runs. The cache this action writes is a per-repository one
-      # a pull request can populate, so restoring from it would take the buildx
-      # binary from something less trustworthy than the pin - and would do it in
-      # the workflow that publishes. Downloading it each run costs seconds.
+      # `network=host` and the inline config are what let the builder reach the
+      # registry service over plain HTTP. Neither affects the bytes a build
+      # produces, which is why they are the caller's to pass and the rest is
+      # not.
       - name: Set Up Buildx
         id: buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        uses: ./.github/actions/setup-builder
         with:
-          version: ${{ steps.pins.outputs.BUILDX_VERSION }}
-          cache-binary: false
-          driver-opts: |
-            image=${{ steps.pins.outputs.BUILDKIT_IMAGE }}
-            network=host
+          driver-opts: network=host
           buildkitd-config-inline: |
             [registry."localhost:5000"]
               http = true

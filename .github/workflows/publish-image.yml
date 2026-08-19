@@ -37,30 +37,14 @@ jobs:
         # zizmor: ignore[artipacked]
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The same read the two rebuilding workflows do, and deliberately so.
-      # These pins used to be written out here and recovered from this file by
-      # pattern, which is a parse that can find the wrong step and say nothing.
-      # .github/builder-pins.env is the declaration now, and every workflow that
-      # needs it is a consumer.
-      - name: Read the builder pins
-        id: pins
-        run: script/builder-pins >>"$GITHUB_OUTPUT"
-
-      # The action SHA pins the action alone: without `version` this installs
-      # the newest buildx release, and without `image` the builder runs whatever
-      # `moby/buildkit:buildx-stable-1` points at that day.
-      #
-      # `cache-binary: false` for the same reason as the pins: the cache this
-      # action writes is a per-repository one a pull request can populate, so
-      # restoring the buildx binary from it would undo the `version` pin.
+      # buildx and buildkit are pinned in .github/builder-pins.env and read
+      # there, along with `cache-binary: false`, by
+      # .github/actions/setup-builder. This is the builder every rebuild that
+      # checks a published digest has to stand up too, which is why it is one
+      # action and not a step written out here.
       - name: Set Up Buildx
         id: buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-        with:
-          version: ${{ steps.pins.outputs.BUILDX_VERSION }}
-          cache-binary: false
-          driver-opts: |
-            image=${{ steps.pins.outputs.BUILDKIT_IMAGE }}
+        uses: ./.github/actions/setup-builder
 
       - name: Log In
         id: login
