@@ -124,7 +124,7 @@ What CI cannot check, pinning has to cover. Both of its builds resolve the same
 Dockerfile frontend, builder image, buildx and buildkit, so all four are pinned
 by digest — in the `# syntax=` and `FROM` lines, and in
 `.github/builder-pins.env`. The SHA on `setup-buildx-action` pins the action and
-nothing else, which is why `.github/actions/setup-builder` passes it both.
+nothing else.
 
 Everything that is a build input lives in exactly one place, and the rest is
 read from it:

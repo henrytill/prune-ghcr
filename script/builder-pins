@@ -15,8 +15,11 @@ set -e
 # The file is the declaration and this is the reader, which is all that is left
 # of a script that used to recover these by matching patterns against
 # publish-image.yml. That parse could return the wrong step's version and exit
-# zero, and the consumers would then rebuild with a builder no publish used and
-# report the difference as if the image were nondeterministic.
+# zero, and the builds would then run on a builder no publish used and report
+# the difference as if the image were nondeterministic.
+#
+# Under Actions the caller is .github/actions/setup-builder, once, for every
+# workflow that needs a builder.
 #
 # Both keys are checked because a missing one is the same silent failure: an
 # empty BUILDKIT_IMAGE leaves driver-opts naming nothing, and the builder falls

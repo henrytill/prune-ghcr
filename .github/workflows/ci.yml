@@ -115,11 +115,6 @@ jobs:
         with:
           persist-credentials: false
 
-      # The same builder publishing stands up, from
-      # .github/actions/setup-builder: buildx and buildkit decide the bytes as
-      # much as the Dockerfile does, so this job comparing builds is only worth
-      # anything if it compares them on the builder a publish would use.
-      #
       # `network=host` and the inline config are what let the builder reach the
       # registry service over plain HTTP. Neither affects the bytes a build
       # produces, which is why they are the caller's to pass and the rest is

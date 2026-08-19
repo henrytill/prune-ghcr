@@ -37,11 +37,8 @@ jobs:
         # zizmor: ignore[artipacked]
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # buildx and buildkit are pinned in .github/builder-pins.env and read
-      # there, along with `cache-binary: false`, by
-      # .github/actions/setup-builder. This is the builder every rebuild that
-      # checks a published digest has to stand up too, which is why it is one
-      # action and not a step written out here.
+      # The builder every rebuild that checks a published digest has to stand
+      # up too, which is why it is one action rather than a step written here.
       - name: Set Up Buildx
         id: buildx
         uses: ./.github/actions/setup-builder
