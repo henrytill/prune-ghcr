@@ -53,8 +53,8 @@ jobs:
       # produces, so a rebuild has to use what publishing used; a third hardcoded
       # copy of the pins is a copy that can be missed by a bump, and the rebuild
       # would then report the mismatch as if the build were nondeterministic.
-      # script/verify-digest's build-input diff covers publish-image.yml, so its
-      # pins at HEAD are the pins the image was built with.
+      # script/verify-digest's build-input diff covers .github/builder-pins.env,
+      # so its pins at HEAD are the pins the image was built with.
       #
       # After the plan, and skipped with it: the only consumer is the buildx
       # step below, which most pull requests do not reach.
