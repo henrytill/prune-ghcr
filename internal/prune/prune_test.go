@@ -227,6 +227,9 @@ func TestDeletesNothingInDryRun(t *testing.T) {
 	if len(versions.deletedIDs) != 0 {
 		t.Errorf("deleted %v, want nothing", versions.deletedIDs)
 	}
+	// Total and Kept both matter here: Deleted stays zero whatever a dry run
+	// finds, so their difference is the only report of what it would have
+	// removed, and the total output exists to carry it out of the process.
 	want := Result{Total: 1, Kept: 0}
 	if result != want {
 		t.Errorf("result = %+v, want %+v", result, want)

@@ -35,6 +35,8 @@ inputs:
     default: 'false'
 
 outputs:
+  total:
+    description: Number of versions considered.
   deleted:
     description: Number of versions deleted.
   kept:
