@@ -1,0 +1,81 @@
+#!/bin/bash
+
+# Exit early
+# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
+set -e
+
+# About:
+#
+# Creates the GitHub release for a tag that has been pushed, as a draft, with
+# the image the tag pins above GitHub's generated notes. It prints the draft's
+# URL; the summary is written there, and publishing it is what makes it a
+# release.
+#
+# A draft because the summary is the one line no script can write. docs/
+# releasing.md has the reasoning, including why an editor on this side of the
+# push is the version of this that was tried and deleted.
+#
+# Separate from script/release because a release that stops here is finished by
+# rerunning this, with the tag and image script/release prints.
+#
+# Usage:
+#
+# script/create-release <tag> <image> [<previous tag>]
+
+# Run from the repository root whatever the caller's directory is: the release
+# is created in the repository this checkout is of.
+here=$(cd "$(dirname "$0")" && pwd)
+cd "$(git -C "$here" rev-parse --show-toplevel)"
+
+tag="${1-}"
+image="${2-}"
+previous_tag="${3-}"
+
+if [[ -z $tag || -z $image ]]; then
+	echo "usage: script/create-release <tag> <image> [<previous tag>]" >&2
+	exit 2
+fi
+
+# script/release resolves this through script/pinned-image, which cannot print
+# anything but a digest -- but the path that matters is the other one, where a
+# rerun has a human retyping the image onto a command line. A release body
+# naming a mutable tag would document a pin this repository does not have.
+if [[ ! $image =~ @sha256:[0-9a-f]{64}$ ]]; then
+	echo "image is not pinned by digest: ${image}" >&2
+	exit 2
+fi
+
+# Before creating anything. A published release makes `gh release create` fail
+# on its own, but a draft holds no tag, so nothing stops a rerun from making a
+# second draft of the same release -- and two of them is a worse state to be in
+# than a message saying where the first one is.
+if url=$(gh release view "$tag" --json url --jq .url 2>/dev/null) && [[ -n $url ]]; then
+	echo "${tag} already has a release: ${url}" >&2
+	exit 1
+fi
+
+# Left to itself the API picks the previous tag, and its idea of previous is the
+# most recent tag it can find -- which for a patch release cut after a major tag
+# moved is not the version before this one. Empty only for a first release.
+start_tag=()
+if [[ -n $previous_tag ]]; then
+	start_tag=(--notes-start-tag "$previous_tag")
+fi
+
+# --notes is prepended to the generated notes, which is the whole arrangement:
+# the digest above, the pull requests below, and the summary to be written above
+# both. Fenced, because a digest is a value to copy rather than prose.
+fence='```'
+
+if ! url=$(gh release create "$tag" \
+	--draft \
+	--verify-tag \
+	--title "$tag" \
+	--notes "$(printf '%s\n%s\n%s' "$fence" "$image" "$fence")" \
+	--generate-notes \
+	"${start_tag[@]}"); then
+	echo "could not create the release for ${tag}" >&2
+	exit 1
+fi
+
+echo "$url"

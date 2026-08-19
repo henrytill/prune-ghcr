@@ -15,7 +15,7 @@ set -e
 # This script will do the following:
 #
 # 1. Retrieve the latest release tag
-# 2. Display the latest release tag
+# 2. Display the latest release tag, and whether its release was published
 # 3. Prompt the user for a new release tag
 # 4. Validate the new release tag
 # 5. Verify action.yml references the image published under this tag
@@ -24,6 +24,7 @@ set -e
 # 8. Point separate major release tag (e.g. v1, v2) to the new release
 # 9. Push the new tags (with commits, if any) to remote
 # 10. If this is a major release, create a 'releases/v#' branch and push
+# 11. Create the GitHub release for the new tag
 #
 # Usage:
 #
@@ -50,8 +51,20 @@ if ! latest_tag=$(git describe --abbrev=0 --match="$semver_tag_glob"); then
 	latest_tag="[unknown]"
 fi
 
-# 2. Display the latest release tag
+# 2. Display the latest release tag, and whether its release was published
 echo -e "The latest release tag is: ${BOLD_BLUE}${latest_tag}${OFF}"
+
+# Step 11 leaves a draft, and a draft nobody published is the failure this
+# script exists to prevent wearing a different hat: the tag is out, consumers
+# can use it, and the release page still says nothing. Nothing else notices, so
+# the next release is where it gets noticed. A warning rather than a refusal --
+# an unpublished draft is last release's business, and blocking this one on it
+# helps nobody.
+if [[ "$latest_tag" != "[unknown]" ]] &&
+	draft=$(gh release view "$latest_tag" --json isDraft --jq .isDraft 2>/dev/null) &&
+	[[ "$draft" = 'true' ]]; then
+	echo -e "${BOLD_RED}The ${latest_tag} release is still a draft${OFF} - write its summary and publish it"
+fi
 
 # 3. Prompt the user for a new release tag
 read -r -p 'Enter a new release tag (vX.X.X format): ' new_tag
@@ -178,6 +191,31 @@ if [ $is_major_release = 'yes' ]; then
 	git push --set-upstream $git_remote "releases/$new_major_release_tag"
 	echo -e "Branch: ${BOLD_GREEN}releases/$new_major_release_tag${OFF} pushed to remote"
 fi
+
+# 11. Create the GitHub release for the new tag
+#
+# Only for the semver tag. v1 and v2 move, so a release attached to one is
+# stale the moment the next patch ships.
+#
+# After the push, because the notes are generated from a tag GitHub can see.
+# As a draft: the summary is the one line no script can write, and a release
+# nobody published is how that is said without this script owning an editor.
+previous_tag=""
+if [[ "$latest_tag" != "[unknown]" ]]; then
+	previous_tag="$latest_tag"
+fi
+
+# docker://, as action.yml spells it: script/pinned-image strips the scheme so
+# that callers comparing digests do not have to, and a release body is read
+# rather than compared.
+if ! release_url=$(script/create-release "$new_tag" "docker://$pinned_image" "$previous_tag"); then
+	echo -e "${BOLD_RED}The tags are pushed, but no release was created${OFF}"
+	echo -e "Rerun: ${BOLD}script/create-release $new_tag docker://$pinned_image $previous_tag${OFF}"
+	exit 1
+fi
+
+echo -e "Draft release: ${BOLD_BLUE}${release_url}${OFF}"
+echo -e "Write the summary at the top of it and ${BOLD}publish${OFF} - until then it is not a release"
 
 # Completed
 echo -e "${BOLD_GREEN}Done!${OFF}"

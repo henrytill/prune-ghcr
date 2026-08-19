@@ -48,6 +48,47 @@ only place the ordering can be enforced:
 The third is what catches a stale digest, which is the failure that would
 otherwise ship older code under a newer version.
 
+## The release itself
+
+Tagging is not the release. Until `v2.0.1` this repository had five tags and no
+releases at all, so nothing but `git log` said what changed between two
+versions; `v1.0.0`, `v2.0.0` and `v2.0.1` were backfilled by hand afterwards.
+
+`script/release` now creates the release as its last step, through
+`script/create-release`, which is one `gh release create`: the image the tag
+pins, prepended to GitHub's generated notes, saved as a **draft**. It prints the
+draft's URL. You write the summary above what is already there and publish it.
+
+It has to be the last step, because the notes are generated from a tag GitHub
+can already see.
+
+The draft is the whole mechanism. Generated notes are accurate and flat: in
+`v2.0.0`, "Port the action to Go" — the change the major version was for — is
+item 12 of 17, between a dependabot bump and a lint fix. The one line that makes
+a release legible is the one line a script cannot write, so the script writes
+everything else and stops. An unpublished draft says "not finished" without this
+repository owning an editor.
+
+One rule came out of getting this wrong first: **no interactive editor on the
+far side of a push that cannot be undone.** The version before this one prepared
+a body, opened `$EDITOR` on it after the tags were pushed, and refused to
+release while a placeholder line survived — and so had to own editor resolution,
+a temporary file's lifetime across a failed attempt, and a protocol for carrying
+a typed summary between attempts. The draft needs none of it.
+
+Two smaller decisions:
+
+- **Only the SemVer tag gets a release.** `v1` and `v2` move, so a release
+  attached to one is stale the moment the next patch ships.
+- **The body records the digest**, because the release page is where a reader
+  looks to find out which image a version pins, and step 5 has already resolved
+  and verified it.
+
+What nothing else would notice is a draft that is never published: the tag is
+out, consumers can use it, and the release page still says nothing. So step 2
+says so, the next time a release is cut. It warns rather than refuses — an
+unpublished draft is the last release's business.
+
 ## Do not prune this package carelessly
 
 Every released image must keep its version tag. An untagged version is exactly
