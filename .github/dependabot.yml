@@ -1,7 +1,14 @@
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    # Both, because this ecosystem scans .github/workflows and an action.yml at
+    # the root it is pointed at, and nothing below that. The buildx and
+    # build-push-action pins live in composite actions under .github/actions, so
+    # `/` alone leaves them unwatched -- a bump or an advisory for either would
+    # open no pull request, and the pin would rot with everything green.
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: weekly
     # Wait for a release to survive in the wild before adopting it. A
