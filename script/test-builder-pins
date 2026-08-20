@@ -18,8 +18,9 @@ set -e
 #
 # The cases at the end are the ones that keep the declaration single and
 # consumed: that nothing else carries a copy of the buildkit pin, that
-# .github/actions/setup-builder is the only thing that stands up a builder, and
-# that everything deciding the bytes is diffed as a build input.
+# .github/actions/setup-builder is the only thing that stands up a builder and
+# still says how, and that everything deciding the bytes is diffed as a build
+# input.
 #
 # The buildx step used to be written out in three workflows, and a grep looked
 # for the version by value to catch a fourth copy. That one is gone: it matched
@@ -194,6 +195,28 @@ if [[ $buildx != "$setup_action" ]]; then
 		"want: ${setup_action}" \
 		"got:  ${buildx//$'\n'/, }"
 fi
+
+# And the two things that file has to keep saying, which the check above does
+# not look at: it asserts which file stands the builder up, not what that file
+# does. Dropping `cache-binary: false` or the pinned image from it leaves
+# everything green -- reproducible-image included, since both its builds would
+# use the same wrong builder and agree with each other -- until a release will
+# not reproduce.
+#
+# Only these two. `version:` and the pins read are visible in the same few
+# lines, and a test that greps a known file for each line it contains passes
+# because the source says what the test says it says.
+# Single-quoted on purpose: the `${{ }}` is GitHub's, and grepping for it is
+# the point.
+# shellcheck disable=SC2016
+for line in 'cache-binary: false' 'image=${{ steps.pins.outputs.BUILDKIT_IMAGE }}'; do
+	cases=$((cases + 1))
+
+	if ! grep -qF -- "$line" "${root}/${setup_action}"; then
+		fail "${setup_action} no longer sets ${line}" \
+			"without it the version pin decides nothing"
+	fi
+done
 
 # And everything that decides the bytes has to stay on build_inputs in
 # script/verify-digest, or a change to it between publishing and merging stops
