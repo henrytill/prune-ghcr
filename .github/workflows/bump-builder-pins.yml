@@ -1,0 +1,121 @@
+name: Bump Builder Pins
+
+# Resolves the newest buildkit and buildx releases into
+# .github/builder-pins.env and pushes a branch with the result.
+#
+# Those two are the last build inputs nothing watches. Dependabot bumps the
+# `uses:` SHAs and reads the Dockerfile, and neither ecosystem can see a
+# key=value file, so the pins moved only when someone remembered -- and a pin
+# nobody moves is a builder that ages while every check stays green. The
+# schedule is the point of this workflow; the dispatch is the cheap part, the
+# same way govulncheck.yml is written.
+#
+# script/bump-builder-pins does the resolving, so that a bump can be made and
+# read by hand as well as here, and so that this file holds no copy of what a
+# pin is allowed to look like. Everything below is the parts that need a runner:
+# a commit, a check, and a branch.
+on:
+  schedule:
+    - cron: '29 6 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    name: Bump Builder Pins
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        id: checkout
+        # Credentials are kept: this workflow pushes the bump branch.
+        # zizmor: ignore[artipacked]
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Committed here rather than in the push step below, so that the checks
+      # run against the commit that would be pushed rather than against a
+      # worktree, and so that a failing check leaves nothing on the remote.
+      - name: Bump the pins
+        id: bump
+        env:
+          # For the release lists script/bump-builder-pins reads. The registry
+          # it reads the digest from is public and takes an anonymous token.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          summary=$(script/bump-builder-pins)
+
+          # The summary is written for this message and is empty exactly when
+          # the file is unchanged, but the file is what decides: a summary is a
+          # description of a diff, and the diff is the thing being committed.
+          if git diff --quiet -- .github/builder-pins.env; then
+            echo "The builder pins are already current; nothing to push."
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "$summary"
+
+          # The Actions bot's own noreply address, in the form publish-image.yml
+          # explains.
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "Bump the builder pins" -m "$summary" \
+              -- .github/builder-pins.env
+
+          echo "changed=true" >>"$GITHUB_OUTPUT"
+
+      # The same check CI runs, before the branch exists rather than after: the
+      # values are new, and a pin that script/builder-pins would reject is one
+      # every build downstream of it reads as a builder that will not start.
+      - name: Test the builder pins
+        id: test-pins
+        if: steps.bump.outputs.changed == 'true'
+        run: script/test-builder-pins
+
+      # A branch and a compare URL rather than a pull request, for the reason
+      # given in licensed.yml: this repository does not let Actions open pull
+      # requests, deliberately.
+      #
+      # One branch, reused, and not one per run. A run-id branch would need this
+      # job to look for a bump already waiting and stand down when it found one,
+      # and an abandoned branch would then silence every run after it -- with an
+      # `echo` inside a green run nobody watches, which is the failure this
+      # workflow exists to remove, one layer up. Reusing the name has the next
+      # bump replace the last one instead: a pull request that is already open
+      # picks up the newer pins as a commit, and merging deletes the branch and
+      # frees the name. It is how Dependabot's own branches behave, so a
+      # reviewer already expects it.
+      #
+      # `--force-with-lease` and not `--force`: replacing last month's bump is
+      # this job's to do, and discarding a commit someone pushed on top of it to
+      # fix something is not. The lease is what tells those apart.
+      #
+      # Spelled out as `<ref>:<oid>` rather than left bare, because a bare lease
+      # reads the remote-tracking ref and a workflow checkout has none for this
+      # branch -- it fetches the ref being built and nothing else, so every bump
+      # after the first would be rejected as `stale info`. The expectation is
+      # read here instead. An empty one is the ref not existing yet, which is
+      # what the first bump after each merge finds.
+      - name: Push a branch with the new pins
+        id: push-branch
+        if: steps.bump.outputs.changed == 'true'
+        run: |
+          branch=builder-pins/update
+          expected=$(git ls-remote origin "refs/heads/${branch}" | cut -f1)
+
+          # `-C` and not `-c`: dispatching this workflow on the bump branch
+          # itself -- the way to refresh a pull request that is already open
+          # -- leaves checkout with that branch checked out here, and `-c`
+          # aborts on a name that exists. The commit is already made by then,
+          # so the run would fail having done the work.
+          git switch -C "$branch"
+          git push --force-with-lease="refs/heads/${branch}:${expected}" \
+              origin "$branch"
+
+          echo "Open a pull request for the new pins, if one is not open already:"
+          echo "  ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${branch}?expand=1"

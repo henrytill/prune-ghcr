@@ -75,9 +75,8 @@ jobs:
           branch="licensed/update-${GITHUB_RUN_ID}"
           git switch -c "$branch"
           git add .licenses
-          # The ID-prefixed noreply address pins attribution to the Actions
-          # bot's account; see publish-image.yml for why a made-up name is
-          # worse than it looks.
+          # The Actions bot's own noreply address, in the form publish-image.yml
+          # explains.
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
               commit -m "Auto-update license files"

@@ -1,0 +1,358 @@
+#!/bin/bash
+
+# Exit early
+# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
+set -e
+
+# About:
+#
+# Checks script/bump-builder-pins.
+#
+# The script asks GitHub for release lists and Docker Hub for a digest, and both
+# answers change under it: the newest release today is not the newest release
+# next month, and a test that asserted either would start failing for a reason
+# that is not a regression. So `gh` and `curl` are replaced on PATH by fakes
+# reading fixtures, and each case says what the world looks like.
+#
+# The fake `gh` runs the real jq over the fixture with the filter the script
+# passed it, rather than answering a canned tag. That filter is where the
+# prerelease flag, the tag shape and the cooldown are actually applied -- a fake
+# that returned the answer would leave the part worth testing untested.
+#
+# What is checked is what a bump can get wrong quietly: taking a prerelease,
+# taking a release published this morning, walking a pin backwards, and
+# following a tag that has moved. Every one of those produces a plausible file
+# that a reviewer would approve.
+#
+# Usage:
+#
+# script/test-bump-builder-pins
+
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(git -C "$here" rev-parse --show-toplevel)
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+failures=0
+cases=0
+
+fail() {
+	failures=$((failures + 1))
+	echo "FAIL: $1"
+	shift
+	printf '  %s\n' "$@"
+}
+
+# Digests are only ever compared, so any 64 hex characters will do, and ones
+# that can be told apart in a failure message do better than real ones.
+digest() {
+	printf 'sha256:%s' "$(printf "$1%.0s" {1..64})"
+}
+
+# The cooldown the script applies, read out of it rather than typed here again.
+# The fixture dates straddle it, and the last case below requires it to equal
+# dependabot.yml's -- so a raise there, where semver-major-days is already 30,
+# would otherwise put `old` inside the cooldown and fail half of these for a
+# reason that is not a regression. That is the failure the fakes exist to
+# remove, and a fixed date puts it back.
+cooldown_days=$(sed -nE 's/^cooldown_days=([0-9]+)$/\1/p' "${root}/script/bump-builder-pins")
+
+if [[ ! $cooldown_days =~ ^[0-9]+$ ]]; then
+	echo "cannot read cooldown_days from script/bump-builder-pins" >&2
+	exit 1
+fi
+
+old=$(date -u -d "$((cooldown_days + 30)) days ago" +%Y-%m-%dT%H:%M:%SZ)
+recent=$(date -u -d "$((cooldown_days / 2)) days ago" +%Y-%m-%dT%H:%M:%SZ)
+
+# One entry of a GitHub release list: tag, prerelease flag, publication date.
+release() {
+	printf '{"draft":false,"prerelease":%s,"tag_name":"%s","published_at":"%s"}' \
+		"$2" "$1" "$3"
+}
+
+# In the order the API returns them, which is by publication date and not by
+# version -- the two come apart in the backport case below.
+releases() {
+	local IFS=,
+	printf '[%s]' "$*"
+}
+
+# Sets up a repository with the pins file, the fakes, and the two scripts, then
+# runs the bump in it.
+#
+#   check <name> <expected status> <expected output> <argument>...
+#
+# with the buildkit release list, the buildx release list and the tag-to-digest
+# table the fakes should answer with in the environment: BUILDKIT_RELEASES,
+# BUILDX_RELEASES and DIGESTS. The pins the fixture starts from are PINS.
+check() {
+	local name=$1 want_status=$2 want_output=$3
+	shift 3
+
+	cases=$((cases + 1))
+
+	local dir="${tmp}/${cases}"
+	mkdir -p "${dir}/.github" "${dir}/script" "${dir}/bin"
+
+	printf '%s\n' "$PINS" >"${dir}/.github/builder-pins.env"
+	cp "${root}/script/builder-pins" "${root}/script/bump-builder-pins" \
+		"${dir}/script/"
+
+	printf '%s' "$BUILDKIT_RELEASES" >"${dir}/buildkit.json"
+	printf '%s' "$BUILDX_RELEASES" >"${dir}/buildx.json"
+	printf '%s\n' "$DIGESTS" >"${dir}/digests"
+
+	# `gh api <path> --jq <filter>`, and nothing else is used. `-r`, because
+	# that is what gh's own --jq does with a string, and a quoted tag would
+	# reach the registry as a tag with quotes in it.
+	cat >"${dir}/bin/gh" <<-'FAKE'
+		#!/bin/bash
+		set -e
+		case $2 in
+		*moby/buildkit*) file=buildkit.json ;;
+		*docker/buildx*) file=buildx.json ;;
+		*) echo "unexpected gh api $2" >&2; exit 1 ;;
+		esac
+		# A fixture of `error` is gh itself failing rather than a release
+		# list: unauthenticated, rate limited, or a network blip.
+		[[ $(cat "$file") != error ]] || { echo "gh: HTTP 403" >&2; exit 1; }
+		jq -r "$4" "$file"
+	FAKE
+
+	# The token fetch and the manifest HEAD, told apart by host. A tag with no
+	# row in the table is one the registry does not have, which curl reports by
+	# failing rather than by printing.
+	cat >"${dir}/bin/curl" <<-'FAKE'
+		#!/bin/bash
+		set -e
+		url=${*: -1}
+		case $url in
+		*auth.docker.io*)
+			echo '{"token":"fake-token"}'
+			;;
+		*registry-1.docker.io*)
+			tag=${url##*/manifests/}
+			digest=$(awk -v t="$tag" '$1 == t { print $2 }' digests)
+			[[ -n $digest ]] || exit 22
+			printf 'HTTP/1.1 200 OK\r\n'
+			printf 'docker-content-digest: %s\r\n' "$digest"
+			printf '\r\n'
+			;;
+		*)
+			echo "unexpected curl ${url}" >&2
+			exit 1
+			;;
+		esac
+	FAKE
+
+	chmod +x "${dir}/bin/gh" "${dir}/bin/curl"
+
+	git -C "$dir" init -q
+	git -C "$dir" add -A
+	git -C "$dir" \
+		-c user.name=test -c user.email=test@example.invalid \
+		commit -qm fixture
+
+	# The dirty-worktree case needs the file changed after the commit.
+	if [[ -n ${DIRTY-} ]]; then
+		printf '%s\n' "$DIRTY" >>"${dir}/.github/builder-pins.env"
+	fi
+
+	local output status=0
+	output=$(cd "$dir" && PATH="${dir}/bin:${PATH}" script/bump-builder-pins "$@" 2>&1) ||
+		status=$?
+
+	if [[ $status -ne $want_status || $output != "$want_output" ]]; then
+		fail "$name" \
+			"want status ${want_status}, got ${status}" \
+			"want output: ${want_output}" \
+			"got output:  ${output}"
+	fi
+
+	# What the file says afterwards, which is the part a caller commits. An
+	# expectation of nothing means it must not have moved.
+	local want_pins="${WANT_PINS-$PINS}"
+	local got_pins
+	got_pins=$(cat "${dir}/.github/builder-pins.env")
+
+	if [[ $got_pins != "$want_pins"* ]]; then
+		fail "${name}: the pins file" \
+			"want: ${want_pins}" \
+			"got:  ${got_pins}"
+	fi
+}
+
+old_digest=$(digest a)
+new_digest=$(digest b)
+moved_digest=$(digest c)
+
+# The two lines of a pins file, which is what a fixture starts from and what
+# every expectation is written in.
+pins_at() {
+	printf 'BUILDKIT_IMAGE=moby/buildkit:%s@%s\nBUILDX_VERSION=%s' "$1" "$2" "$3"
+}
+
+PINS=$(pins_at v0.32.2 "$old_digest" v0.36.1)
+
+DIGESTS="v0.32.2 ${old_digest}
+v0.33.0 ${new_digest}"
+
+# Nothing newer than the pins. The common case by far, and the one the workflow
+# reads as "no branch to push".
+BUILDKIT_RELEASES=$(releases "$(release v0.32.2 false "$old")")
+BUILDX_RELEASES=$(releases "$(release v0.36.1 false "$old")")
+
+check "already current" 0 ""
+
+# A release of each, past the cooldown.
+BUILDKIT_RELEASES=$(releases \
+	"$(release v0.33.0 false "$old")" "$(release v0.32.2 false "$old")")
+BUILDX_RELEASES=$(releases \
+	"$(release v0.37.0 false "$old")" "$(release v0.36.1 false "$old")")
+
+WANT_PINS=$(pins_at v0.33.0 "$new_digest" v0.37.0)
+check "a newer release of each" 0 "buildkit v0.32.2 -> v0.33.0
+buildx v0.36.1 -> v0.37.0"
+unset WANT_PINS
+
+# A patch backported onto an older minor line, published after the newer minor
+# it does not contain. It sits above that minor in a list ordered by date, so
+# taking the first survivor would pin v0.32.3 and leave v0.33.0 skipped until
+# some later-dated release turned up -- while the diff read as an ordinary bump.
+BUILDKIT_RELEASES=$(releases \
+	"$(release v0.32.3 false "$old")" \
+	"$(release v0.33.0 false "$old")" \
+	"$(release v0.32.2 false "$old")")
+BUILDX_RELEASES=$(releases "$(release v0.36.1 false "$old")")
+
+WANT_PINS=$(pins_at v0.33.0 "$new_digest" v0.36.1)
+check "a backport published after a newer minor" 0 "buildkit v0.32.2 -> v0.33.0"
+unset WANT_PINS
+
+# A prerelease is not a release. buildkit publishes the Dockerfile frontend on
+# the same list, and those tags are not prereleases at all -- `dockerfile/1.27.0`
+# is a stable release of something that is not buildkit, so the tag shape has to
+# refuse it rather than the flag.
+BUILDKIT_RELEASES=$(releases \
+	"$(release dockerfile/1.27.0 false "$old")" \
+	"$(release v0.33.0-rc1 true "$old")" \
+	"$(release v0.32.2 false "$old")")
+BUILDX_RELEASES=$(releases \
+	"$(release v0.37.0-rc2 true "$old")" "$(release v0.36.1 false "$old")")
+
+check "prereleases and frontend tags" 0 ""
+
+# Published this morning. Adopting it is the thing the cooldown in
+# dependabot.yml exists to not do, and a yanked release is gone by the time the
+# week is up.
+BUILDKIT_RELEASES=$(releases \
+	"$(release v0.33.0 false "$recent")" "$(release v0.32.2 false "$old")")
+BUILDX_RELEASES=$(releases "$(release v0.36.1 false "$old")")
+
+check "a release inside the cooldown" 0 ""
+
+# And the same list with the cooldown waived, which is what makes the case above
+# a cooldown rather than a lookup that found nothing.
+WANT_PINS=$(pins_at v0.33.0 "$new_digest" v0.36.1)
+check "the cooldown waived" 0 "buildkit v0.32.2 -> v0.33.0" --cooldown-days 0
+unset WANT_PINS
+
+# A pin someone moved forward by hand, with the cooldown still holding the
+# resolved answer behind it. Taking the newest release the filter admits would
+# undo their bump, and the diff would read as an ordinary one.
+PINS=$(pins_at v0.33.0 "$new_digest" v0.36.1)
+BUILDKIT_RELEASES=$(releases \
+	"$(release v0.33.0 false "$recent")" "$(release v0.32.2 false "$old")")
+BUILDX_RELEASES=$(releases "$(release v0.36.1 false "$old")")
+
+check "a pin ahead of the newest release" 0 ""
+
+# Asked for by name, though. Pinning back to a known-good release is why the
+# flags are there, so the guard above must not apply to one.
+WANT_PINS=$(pins_at v0.32.2 "$old_digest" v0.36.1)
+check "an explicit older tag" 0 "buildkit v0.33.0 -> v0.32.2" --buildkit v0.32.2
+unset WANT_PINS
+
+# A tag serving bytes it did not serve before. This is not a bump and must not
+# be committed as one: these tags are published once, so a moved one is a
+# release that was retagged or a registry that has been tampered with.
+PINS=$(pins_at v0.32.2 "$old_digest" v0.36.1)
+DIGESTS="v0.32.2 ${moved_digest}"
+BUILDKIT_RELEASES=$(releases "$(release v0.32.2 false "$old")")
+BUILDX_RELEASES=$(releases "$(release v0.36.1 false "$old")")
+
+check "a tag that has moved" 1 \
+	"moby/buildkit:v0.32.2 now serves ${moved_digest}, but the pin says ${old_digest}: the tag moved"
+
+DIGESTS="v0.32.2 ${old_digest}"
+
+# An edit in progress. The current values are read from the commit, so rewriting
+# the worktree against them would discard whatever the edit was.
+DIRTY="BUILDX_VERSION=v0.36.2"
+
+check "uncommitted changes" 1 \
+	".github/builder-pins.env has uncommitted changes; commit or discard them first"
+unset DIRTY
+
+# gh failing, which leaves the tag empty exactly as a cooldown that admits
+# nothing does. Reporting it as the cooldown would send a reader to the one
+# place the answer is not, so the two are told apart before the message is
+# chosen.
+BUILDKIT_RELEASES=error
+BUILDX_RELEASES=$(releases "$(release v0.36.1 false "$old")")
+
+check "the release list cannot be read" 1 "gh: HTTP 403
+could not read the moby/buildkit release list"
+
+# A cooldown that admits nothing. The page is 30 entries and neither project
+# goes a cooldown's worth of days without a release, so an empty answer is one
+# to report rather than to page past -- and reporting it has to stop the run
+# rather than resolve an empty tag and carry it to the registry.
+BUILDKIT_RELEASES=$(releases "$(release v0.33.0 false "$recent")")
+BUILDX_RELEASES=$(releases "$(release v0.36.1 false "$old")")
+
+check "no release the cooldown admits" 1 \
+	"no moby/buildkit release older than ${cooldown_days} days"
+
+BUILDKIT_RELEASES=$(releases "$(release v0.32.2 false "$old")")
+
+usage="usage: script/bump-builder-pins [--buildkit <tag>] [--buildx <version>] [--cooldown-days <n>]"
+
+check "an unknown flag" 2 "$usage" --buildkits v0.32.2
+
+# A flag present but empty is a caller whose own lookup failed, and resolving
+# one for it would answer a question nobody asked.
+check "an empty flag value" 2 "$usage" --buildkit ""
+
+# A tag is the one value that reaches the rewrite without having come from the
+# release filter, and inside a sed expression a `|` in it is syntax.
+check "a tag that is not a version" 2 "$usage" --buildkit 'v0.32.2|d'
+
+check "a cooldown that is not a number" 2 "$usage" --cooldown-days weekly
+
+# The cooldown is Dependabot's, and the script's header says so -- but the number
+# is typed out in both files and nothing reads one from the other. Bumping
+# dependabot.yml would leave the pins still adopting at the old figure, with the
+# next bump reading as an ordinary one. Read from bash rather than tied together,
+# because parsing YAML to share an integer is worse than the drift it prevents.
+cases=$((cases + 1))
+
+want_days=$(awk '
+	/^  - package-ecosystem:/ { ecosystem = $3 }
+	ecosystem == "github-actions" && $1 == "default-days:" { print $2; exit }
+' "${root}/.github/dependabot.yml")
+
+if [[ -z $want_days || $want_days != "$cooldown_days" ]]; then
+	fail "the cooldown matches dependabot.yml" \
+		"dependabot.yml github-actions default-days: ${want_days:-<none>}" \
+		"script/bump-builder-pins cooldown_days:        ${cooldown_days}"
+fi
+
+if [[ $failures -gt 0 ]]; then
+	echo "${failures} of ${cases} cases failed"
+	exit 1
+fi
+
+echo "${cases} cases passed"
