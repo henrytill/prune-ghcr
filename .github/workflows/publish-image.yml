@@ -110,9 +110,12 @@ jobs:
           branch="publish/${TAG}-${GITHUB_RUN_ID}"
           git switch -c "$branch"
           git add action.yml
-          # The ID-prefixed noreply address pins attribution to the Actions
-          # bot's account. A bare made-up <name>@users.noreply.github.com would
-          # attribute these commits to whoever registers <name> as a username.
+          # The Actions bot's own noreply address, written in the ID-prefixed
+          # form GitHub uses for a user. The bare
+          # github-actions[bot]@users.noreply.github.com resolves to the same
+          # account -- a bracketed bot name is not a registrable username, so
+          # there is nobody to squat it -- which makes the prefix the
+          # convention here rather than what makes the attribution hold.
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
               commit -m "Point the action at the ${TAG} image"

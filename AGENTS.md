@@ -132,7 +132,11 @@ read from it:
 - the buildx and buildkit pins in `.github/builder-pins.env`, read with
   `script/builder-pins`. A `key=value` file rather than a step some other
   workflow parses: recovering them from `publish-image.yml` by pattern was a
-  parse that could find another action's `version:` and exit zero
+  parse that could find another action's `version:` and exit zero. Neither
+  ecosystem Dependabot runs here can see that file, so
+  `script/bump-builder-pins` resolves the newest release of each and rewrites it
+  — `bump-builder-pins.yml` runs it weekly and pushes a branch, the way
+  publishing does, and refuses a buildkit tag that now serves a different digest
 - the `setup-buildx-action` SHA, `cache-binary: false` and the read of those
   pins in `.github/actions/setup-builder`, which all three workflows that need a
   builder go through. Callers pass only how the builder reaches a registry,

@@ -1,0 +1,299 @@
+#!/bin/bash
+
+# Exit early
+# See: https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#The-Set-Builtin
+set -e
+
+# About:
+#
+# Rewrites .github/builder-pins.env with the newest buildkit and buildx
+# releases, and prints what moved:
+#
+#   buildkit v0.32.2 -> v0.33.0
+#   buildx v0.36.1 -> v0.37.0
+#
+# Nothing is printed and nothing is written when both pins are already current,
+# so `git diff --quiet` is what a caller checks rather than this output.
+#
+# These two are the only build inputs nothing watches. Dependabot's
+# github-actions ecosystem bumps `uses:` SHAs and its docker ecosystem reads the
+# Dockerfile, and neither can see a key=value file, so before this they moved
+# only when someone remembered -- which for a pin means a builder that ages
+# quietly while every check stays green.
+#
+# What it does not do is decide anything. It resolves, rewrites and stops; the
+# commit, the review and the merge are still a person's, the same way
+# .github/workflows/publish-image.yml pushes a branch and leaves the pull
+# request to be opened.
+#
+# The cooldown is the one in .github/dependabot.yml, for the reason given there:
+# a compromised release is usually yanked within days, and neither of these is
+# urgent enough to be worth installing on its first day. Prereleases are skipped
+# outright -- buildkit publishes `dockerfile/1.27.0-rc1` tags for the frontend
+# on the same release list, so the tag shape is checked as well as the flag.
+#
+# Options:
+#
+#   --buildkit <tag>       take this buildkit release rather than resolving one
+#   --buildx <version>     take this buildx release rather than resolving one
+#   --cooldown-days <n>    override the release age required, 0 to take today's
+#
+# An explicit tag is honoured whether or not it is newer, because pinning back
+# to a known-good release is the reason to reach for one. A resolved tag is
+# never older than the pin it replaces: with a cooldown, the newest release the
+# filter admits is older than a pin someone has just moved forward by hand, and
+# a bump script that walks backwards is worse than one that does nothing.
+#
+# Requires gh, authenticated, for the release lists, and curl and jq for the
+# registry.
+#
+# Usage:
+#
+# script/bump-builder-pins [--buildkit <tag>] [--buildx <version>]
+#                          [--cooldown-days <n>]
+
+# Run from the repository root whatever the caller's directory is, so that the
+# pins file and script/builder-pins resolve. The point of these being scripts is
+# that they can be run by hand, and by hand is rarely from the root.
+here=$(cd "$(dirname "$0")" && pwd)
+cd "$(git -C "$here" rev-parse --show-toplevel)"
+
+pins_file=.github/builder-pins.env
+
+# The image is Docker Hub's `moby/buildkit`, and its releases are the GitHub
+# repository of the same name. buildx is a separate repository with its own
+# release cadence, which is why these are two pins and not one.
+buildkit_repo=moby/buildkit
+buildx_repo=docker/buildx
+
+buildkit_tag=
+buildx_version=
+cooldown_days=7
+
+usage() {
+	echo "usage: script/bump-builder-pins [--buildkit <tag>]" \
+		"[--buildx <version>] [--cooldown-days <n>]" >&2
+	exit 2
+}
+
+# The tag shape the release filter admits below, applied to a tag that arrives
+# as a flag instead. A flag is the one value that reaches the rewrite without
+# having come from that filter, and by the time it is inside a `sed` expression
+# a `|` or a backslash in it is syntax. It refuses an empty value too: a flag
+# present but empty is a caller whose own lookup failed, and answering it by
+# resolving a release looks entirely plausible and is not what was asked for.
+is_version() {
+	[[ $1 =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+# `${2-}` rather than `[[ $# -lt 2 ]]`: a flag at the end of the line and a flag
+# given an empty value are the same mistake and get the same answer.
+while [[ $# -gt 0 ]]; do
+	case $1 in
+	--buildkit)
+		buildkit_tag=${2-}
+		is_version "$buildkit_tag" || usage
+		shift 2
+		;;
+	--buildx)
+		buildx_version=${2-}
+		is_version "$buildx_version" || usage
+		shift 2
+		;;
+	--cooldown-days)
+		cooldown_days=${2-}
+		[[ $cooldown_days =~ ^[0-9]+$ ]] || usage
+		shift 2
+		;;
+	*)
+		usage
+		;;
+	esac
+done
+
+# The current values come from script/builder-pins rather than from a grep here,
+# so that the file has one reader and the values this compares against are ones
+# that reader has already checked. It reads the commit, not the worktree, so a
+# worktree that has drifted from it would be rewritten against the wrong
+# baseline -- and the rewrite would then overwrite whatever the drift was.
+if ! git diff --quiet -- "$pins_file" ||
+	! git diff --cached --quiet -- "$pins_file"; then
+	echo "${pins_file} has uncommitted changes; commit or discard them first" >&2
+	exit 1
+fi
+
+current_image=$(script/builder-pins HEAD BUILDKIT_IMAGE)
+current_buildx=$(script/builder-pins HEAD BUILDX_VERSION)
+
+current_tag=${current_image#"${buildkit_repo}":}
+current_tag=${current_tag%@*}
+current_digest=${current_image#*@}
+
+# Highest release of a repository that is not a prerelease, is a plain vX.Y.Z,
+# and is older than the cooldown.
+#
+# Highest and not first: /releases is ordered by publication date, and a
+# backport onto an older minor line is published after the newer minor it does
+# not contain. moby/buildkit has done exactly that -- v0.17.3 came out a week
+# after v0.18.0 -- so taking the first survivor would commit v0.17.2 ->
+# v0.17.3, a diff that reads as an ordinary bump, and leave v0.18.0 unpinned
+# until something later-dated appeared. `sort -V` is the comparison is_newer
+# already uses.
+#
+# Lexicographic on published_at is a real comparison, not a coincidence: both
+# sides are RFC 3339 in UTC with a fixed number of digits.
+#
+# A page of 30 rather than the 100 the API will serve. Every entry carries its
+# release body and its asset list, so a full page of buildx is around 8MB to
+# read one tag name out of; 30 is 3MB, and holds 14 releases that pass this
+# filter against a cooldown measured in days. A page that somehow held none is
+# reported below rather than paged through: with these two projects that is not
+# a release cadence, it is an answer to disbelieve.
+latest_release() {
+	local repo=$1 cutoff=$2 tags tag
+
+	# `if !` and not a bare assignment: gh failing -- unauthenticated, rate
+	# limited, or a network blip in the scheduled run -- leaves the tag
+	# empty, and the empty case below would then report a cooldown that ate
+	# a list nothing ever read. gh's own stderr is on the runner log, but a
+	# message that names the cooldown points away from it.
+	if ! tags=$(gh api "repos/${repo}/releases?per_page=30" --jq "
+		.[]
+		| select(.draft == false and .prerelease == false)
+		| select(.tag_name | test(\"^v[0-9]+\\\\.[0-9]+\\\\.[0-9]+$\"))
+		| select(.published_at < \"${cutoff}\")
+		| .tag_name
+	"); then
+		echo "could not read the ${repo} release list" >&2
+		return 1
+	fi
+
+	tag=$(sort -V <<<"$tags" | tail -n 1)
+
+	if [[ -z $tag ]]; then
+		echo "no ${repo} release older than ${cooldown_days} days" >&2
+		return 1
+	fi
+
+	echo "$tag"
+}
+
+# The digest Docker Hub currently serves for a tag. A HEAD, because the answer
+# is the docker-content-digest header and the body is the manifest itself; both
+# media types are accepted, because these are multi-platform tags and asking for
+# neither index type gets one platform's manifest and so one platform's digest.
+tag_digest() {
+	local repo=$1 tag=$2 token digest
+
+	token=$(curl -fsSL \
+		"https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull" |
+		jq -r '.token // empty')
+
+	if [[ -z $token ]]; then
+		echo "no registry token for ${repo}" >&2
+		exit 1
+	fi
+
+	digest=$(curl -fsSI \
+		-H "Authorization: Bearer ${token}" \
+		-H 'Accept: application/vnd.oci.image.index.v1+json' \
+		-H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+		"https://registry-1.docker.io/v2/${repo}/manifests/${tag}" |
+		tr -d '\r' |
+		sed -nE 's/^[Dd]ocker-[Cc]ontent-[Dd]igest: (sha256:[0-9a-f]{64})$/\1/p')
+
+	if [[ -z $digest ]]; then
+		echo "no digest for ${repo}:${tag}" >&2
+		exit 1
+	fi
+
+	echo "$digest"
+}
+
+# Whether $1 is newer than $2. `sort -V` and not a string compare: v0.9.0 sorts
+# after v0.10.0 as a string, which is the direction that matters here, since
+# taking the older one is the case this exists to refuse.
+is_newer() {
+	[[ $1 != "$2" && $(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n 1) == "$1" ]]
+}
+
+# The release a pin should move to, which is the current one whenever the newest
+# release is not newer than it. Both pins are resolved through here, so that the
+# refusal to walk backwards is written once rather than once per pin: it is the
+# subtle half of this, and half of it fixed is worse than none.
+resolve_pin() {
+	local repo=$1 current=$2 resolved
+
+	# `|| return 1` and not the bare assignment `set -e` would ordinarily
+	# catch: a command substitution that feeds an assignment does not honour
+	# `set -e`, so latest_release exiting 1 leaves this function printing an
+	# empty resolved tag and returning 0. Every call in this chain says what
+	# to do with a failure, because none of them are told.
+	resolved=$(latest_release "$repo" "$cutoff") || return 1
+
+	if is_newer "$resolved" "$current"; then
+		echo "$resolved"
+	else
+		echo "$current"
+	fi
+}
+
+cutoff=$(date -u -d "${cooldown_days} days ago" +%Y-%m-%dT%H:%M:%SZ)
+
+if [[ -z $buildkit_tag ]]; then
+	buildkit_tag=$(resolve_pin "$buildkit_repo" "$current_tag") || exit 1
+fi
+
+if [[ -z $buildx_version ]]; then
+	buildx_version=$(resolve_pin "$buildx_repo" "$current_buildx") || exit 1
+fi
+
+# Resolved even when the tag is not moving, because that is the case worth
+# knowing about. These tags are published once and never moved; one that now
+# serves different bytes is either a registry that has been tampered with or a
+# release that was retagged, and both are things to look at rather than to
+# commit under a subject line that says a version changed.
+buildkit_digest=$(tag_digest "$buildkit_repo" "$buildkit_tag") || exit 1
+
+if [[ $buildkit_tag == "$current_tag" && $buildkit_digest != "$current_digest" ]]; then
+	echo "${buildkit_repo}:${buildkit_tag} now serves ${buildkit_digest}," \
+		"but the pin says ${current_digest}: the tag moved" >&2
+	exit 1
+fi
+
+buildkit_image="${buildkit_repo}:${buildkit_tag}@${buildkit_digest}"
+
+if [[ $buildkit_image == "$current_image" && $buildx_version == "$current_buildx" ]]; then
+	exit 0
+fi
+
+# One `s|^KEY=.*|KEY=value|` per key, over a file whose two keys script/
+# builder-pins has just read exactly once each, and with both values checked
+# against a shape that has no `|` or backslash in it to be read as syntax.
+#
+# The lines are read back anyway, because a rewrite that produced something
+# other than what was asked for is committed by the caller either way: sed
+# rewrites every line that matches, so a file that had grown a second
+# BUILDKIT_IMAGE= line arrives here as two identical ones, and a count is what
+# tells those apart from the one line intended.
+sed -i -E \
+	-e "s|^BUILDKIT_IMAGE=.*|BUILDKIT_IMAGE=${buildkit_image}|" \
+	-e "s|^BUILDX_VERSION=.*|BUILDX_VERSION=${buildx_version}|" \
+	"$pins_file"
+
+for want in "BUILDKIT_IMAGE=${buildkit_image}" "BUILDX_VERSION=${buildx_version}"; do
+	if [[ $(grep -cxF -- "$want" "$pins_file") -ne 1 ]]; then
+		echo "${pins_file} does not now declare ${want} exactly once" >&2
+		exit 1
+	fi
+done
+
+# Versions and not digests, because this is written for a commit message and the
+# digest is in the diff directly below it.
+if [[ $buildkit_image != "$current_image" ]]; then
+	echo "buildkit ${current_tag} -> ${buildkit_tag}"
+fi
+
+if [[ $buildx_version != "$current_buildx" ]]; then
+	echo "buildx ${current_buildx} -> ${buildx_version}"
+fi
