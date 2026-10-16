@@ -1,0 +1,11 @@
+# See: https://docs.zizmor.sh/configuration/
+
+rules:
+  # self-repository wants local actions written `uses: $/...` rather than
+  # `uses: ./...`. actionlint, which super-linter also runs, rejects `$/` as an
+  # action reference with no ref, so no spelling passes both. `./` loses
+  # nothing here: every workflow that uses a local action checks out the
+  # default ref first, so both forms resolve to the commit that is running.
+  # Enable this once actionlint accepts `$/`.
+  self-repository:
+    disable: true
