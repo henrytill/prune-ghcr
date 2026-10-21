@@ -44,7 +44,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 # checkov:skip=CKV_DOCKER_3: running as root is the deliberate choice above.
 # checkov:skip=CKV_DOCKER_2: a healthcheck is meaningless for a container that
 # runs once to completion and exits.
-FROM gcr.io/distroless/static-debian13@sha256:58133991db06659feaabe0f4e97a35cebf15ef4ea08f8a4c6d2ee5f75e4aa6a0
+FROM gcr.io/distroless/static-debian13@sha256:9e0130bec991f471279b70f1630ada11e46dad439ef2949544f96001225329fb
 
 COPY --from=build /out/prune-ghcr /prune-ghcr
 
