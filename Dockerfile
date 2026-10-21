@@ -16,7 +16,7 @@
 # these tags on security updates, so the tag alone names different bytes on
 # different days - which reproduces as a failed rebuild weeks later rather than
 # as anything CI can see, since both of its builds resolve the tag seconds apart.
-FROM --platform=$BUILDPLATFORM golang:1.26.8-trixie@sha256:aae9c439b447d24c93ee483408992857cf39a3fb6ab7fe53affc65d834891fa8 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c AS build
 
 WORKDIR /src
 
