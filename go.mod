@@ -1,6 +1,6 @@
 module github.com/henrytill/prune-ghcr
 
-go 1.26.6
+go 1.26.10
 
 require (
 	github.com/google/go-containerregistry v0.22.1
